@@ -192,3 +192,34 @@ async def test_name_comes_back_in_the_requested_language() -> None:
         out = _results(await mcp.call_tool("search_exercises", {"query": "bench press"}))
 
     assert out[0]["name"] == "Barbell Bench Press"
+
+
+async def test_specific_query_outranks_the_generic_match() -> None:
+    """wger matches any word, so a plain "Bench Press" comes back for
+    "incline barbell bench press". The specific one has to win."""
+    mcp = _register()
+
+    def variant(pk: int, name: str) -> dict[str, Any]:
+        ex = _exercise()
+        ex["id"] = pk
+        ex["translations"] = [{"language": 2, "name": name}]
+        return ex
+
+    results = [
+        variant(1, "Bench Press"),
+        variant(2, "Bench Press Narrow Grip"),
+        variant(3, "Incline Bench Press - Barbell"),
+    ]
+    with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 3, "next": None, "results": results}
+        )
+        out = _results(
+            await mcp.call_tool(
+                "search_exercises",
+                {"query": "incline barbell bench press", "limit": 2},
+            )
+        )
+
+    assert [o["name"] for o in out] == ["Incline Bench Press - Barbell", "Bench Press"]

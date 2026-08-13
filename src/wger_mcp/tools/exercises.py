@@ -20,6 +20,24 @@ _NUTRISCORE = r"^[A-Ea-e]$"
 # Facts batch lookup.
 _BATCH_CONCURRENCY = 4
 
+# How many candidates to pull before ranking locally. Bandwidth is cheap; the
+# caller's context is not, so only the top few survive.
+_RANK_POOL = 20
+
+
+def _relevance(name: str, query: str) -> tuple[int, int]:
+    """How well a name answers a query: matched words first, then brevity.
+
+    wger's name__search matches any single word, so "incline barbell bench press"
+    ranks a plain "Bench Press" alongside the incline variant. Counting how many
+    of the query's words the name actually contains puts the specific match
+    first; shorter names break ties, so "Bench Press" still beats "Bench Press
+    Narrow Grip" for the query "bench press".
+    """
+    lowered = (name or "").lower()
+    hits = sum(1 for word in query.lower().split() if word in lowered)
+    return (-hits, len(lowered))
+
 
 def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     default_language = settings.default_language
@@ -45,10 +63,13 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     async def _search(query: str, lang: str, limit: int) -> list[dict[str, Any]]:
         """One name-search, shaped down to what picks an exercise."""
         language_id = await _language_id_for(lang)
+        # Fetch wider than asked for, rank locally, then trim: the extra rows cost
+        # a little bandwidth and no context, and wger's own ordering buries the
+        # exact match behind looser ones.
         results = await client.paginate(
             "exerciseinfo/",
             params={"name__search": query, "language__code": lang},
-            limit=limit,
+            limit=max(limit, _RANK_POOL),
         )
         q_lower = query.lower()
         shaped: list[dict[str, Any]] = []
@@ -70,7 +91,8 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
                 "category": (ex.get("category") or {}).get("name"),
                 "equipment": [e.get("name") for e in (ex.get("equipment") or [])],
             })
-        return shaped
+        shaped.sort(key=lambda s: _relevance(s.get("name") or "", query))
+        return shaped[:limit]
 
     @mcp.tool()
     async def search_exercises(
