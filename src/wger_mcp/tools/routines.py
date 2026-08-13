@@ -11,7 +11,7 @@ from pydantic import Field
 
 from ..config import Settings
 from ..wger_client import WgerClient, WgerError
-from .common import bad_request, err
+from .common import WEIGHT_UNITS, bad_request, err
 
 # Per-iteration config endpoints. Each config kind lives on its own
 # resource linked by slot_entry; the entry itself only stores the
@@ -457,13 +457,28 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
         exercise_id: str,
         sets: Annotated[int, Field(ge=1, le=50)],
         reps: Annotated[int, Field(ge=1, le=1000)],
-        weight_kg: Annotated[float, Field(ge=0, le=1000)],
+        weight: Annotated[float | None, Field(ge=0, le=2000)] = None,
         slot_order: Annotated[int, Field(ge=1, le=100)] = 1,
         rest_seconds: Annotated[int | None, Field(ge=0, le=3600)] = None,
+        weight_unit: str = "kg",
+        rir: Annotated[float | None, Field(ge=0, le=10)] = None,
     ) -> dict[str, Any]:
-        """High-level convenience: create slot + slot-entry + sets/reps/weight
-        configs in one call. Returns the created ids. Partial failures are
-        reported in the response."""
+        """High-level convenience: create slot + slot-entry + sets/reps configs
+        in one call. Returns the created ids. Partial failures are reported in
+        the response.
+
+        weight is optional — omit it to prescribe an exercise without a load,
+        which is the honest thing to do before the trainee's working weights are
+        known. weight_unit is 'kg' or 'lb' and is recorded on the entry, so the
+        number is stored in the unit it was given in rather than converted.
+
+        rir sets a Reps-In-Reserve target for the set, wger's autoregulation
+        field: 2 means "stop with two good reps left".
+        """
+        if weight_unit not in WEIGHT_UNITS:
+            return bad_request(
+                f"unknown weight_unit '{weight_unit}'; expected one of {', '.join(WEIGHT_UNITS)}"
+            )
         result: dict[str, Any] = {}
         slot_payload: dict[str, Any] = {"day": day_id, "order": slot_order}
         if rest_seconds is not None:
@@ -480,7 +495,13 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
         try:
             entry = await client.post(
                 "slot-entry/",
-                json={"slot": slot_id, "exercise": exercise_id, "order": 1, "comment": ""},
+                json={
+                    "slot": slot_id,
+                    "exercise": exercise_id,
+                    "order": 1,
+                    "comment": "",
+                    "weight_unit": WEIGHT_UNITS[weight_unit],
+                },
             )
         except WgerError as exc:
             return result | err(exc) | {"stage": "slot-entry"}
@@ -489,7 +510,13 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
         if not entry_id:
             return result | {"error": True, "stage": "slot-entry", "detail": "missing entry id"}
 
-        for kind, value in (("sets", sets), ("reps", reps), ("weight", weight_kg)):
+        configs: list[tuple[str, float]] = [("sets", sets), ("reps", reps)]
+        if weight is not None:
+            configs.append(("weight", weight))
+        if rir is not None:
+            configs.append(("rir", rir))
+
+        for kind, value in configs:
             try:
                 result[f"{kind}_config"] = await client.post(
                     SLOT_CONFIG_PATHS[kind],
