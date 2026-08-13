@@ -37,6 +37,13 @@ def _register() -> FastMCP:
     return mcp
 
 
+def _mock_language(mock: Any) -> None:
+    """Search resolves the configured code to wger's numeric language id."""
+    mock.get("/language/").respond(
+        json={"count": 1, "next": None, "results": [{"id": 2, "short_name": "en"}]}
+    )
+
+
 def _results(raw: Any) -> list[dict[str, Any]]:
     payload = raw[1] if isinstance(raw, tuple) else raw
     if isinstance(payload, dict) and "result" in payload:
@@ -54,6 +61,7 @@ def _exercise() -> dict[str, Any]:
         "equipment": [{"id": 1, "name": "Barbell"}],
         "muscles": [{"id": 4, "name": "Pectoralis major"}],
         "images": [{"image": "/media/x.png", "is_main": True, "thumbnails": {"small": "/s.png"}}],
+        # language 2 is English in wger; the rest are noise the shaping must not pick
         "translations": [
             {"language": n, "name": f"Bench Press {n}", "description": "<p>lorem ipsum</p>"}
             for n in range(1, 17)
@@ -64,6 +72,7 @@ def _exercise() -> dict[str, Any]:
 async def test_search_omits_translations_images_and_uuid() -> None:
     mcp = _register()
     with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
         mock.get("/exerciseinfo/").respond(
             json={"count": 1, "next": None, "results": [_exercise()]}
         )
@@ -81,6 +90,7 @@ async def test_search_payload_stays_small() -> None:
     table into the model's context."""
     mcp = _register()
     with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
         mock.get("/exerciseinfo/").respond(
             json={"count": 1, "next": None, "results": [_exercise()]}
         )
@@ -95,6 +105,7 @@ async def test_search_payload_stays_small() -> None:
 async def test_filter_search_keeps_muscles_but_drops_uuid() -> None:
     mcp = _register()
     with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
         mock.get("/exerciseinfo/").respond(
             json={"count": 1, "next": None, "results": [_exercise()]}
         )
@@ -123,6 +134,7 @@ async def test_batch_resolves_many_names_in_one_call() -> None:
     """One call instead of one inference round trip per exercise."""
     mcp = _register()
     with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
         mock.get("/exerciseinfo/").respond(
             json={"count": 1, "next": None, "results": [_exercise()]}
         )
@@ -142,6 +154,7 @@ async def test_batch_resolves_many_names_in_one_call() -> None:
 async def test_batch_collapses_duplicate_queries() -> None:
     mcp = _register()
     with respx.mock(base_url=API) as mock:
+        _mock_language(mock)
         route = mock.get("/exerciseinfo/").respond(
             json={"count": 1, "next": None, "results": [_exercise()]}
         )
@@ -159,3 +172,23 @@ async def test_batch_of_nothing_is_not_an_error() -> None:
     mcp = _register()
     out = _results(await mcp.call_tool("search_exercises_batch", {"queries": []}))
     assert out == {"count": 0, "results": {}}
+
+
+async def test_name_comes_back_in_the_requested_language() -> None:
+    """wger filters WHICH exercises match a language but returns every
+    translation; picking the wrong one hands back a foreign name."""
+    mcp = _register()
+    exercise = _exercise()
+    exercise["translations"] = [
+        {"language": 1, "name": "Bankdrucken LH"},
+        {"language": 2, "name": "Barbell Bench Press"},
+        {"language": 13, "name": "Distensione su panca"},
+    ]
+    with respx.mock(base_url=API) as mock:
+        _mock_language(mock)  # en -> 2
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [exercise]}
+        )
+        out = _results(await mcp.call_tool("search_exercises", {"query": "bench press"}))
+
+    assert out[0]["name"] == "Barbell Bench Press"

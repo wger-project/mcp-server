@@ -23,9 +23,28 @@ _BATCH_CONCURRENCY = 4
 
 def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     default_language = settings.default_language
+    # exerciseinfo filters WHICH exercises match a language, but each one still
+    # carries every translation. Picking the wrong one hands the caller a name in
+    # a language it did not ask for, so resolve the code to wger's numeric id and
+    # prefer that translation. Cached: the language table is static.
+    _language_id: dict[str, int | None] = {}
+
+    async def _language_id_for(code: str) -> int | None:
+        if code not in _language_id:
+            try:
+                rows = await client.paginate(
+                    "language/", params={"short_name": code}, limit=5
+                )
+                _language_id[code] = next(
+                    (r.get("id") for r in rows if isinstance(r, dict) and r.get("id")), None
+                )
+            except WgerError:
+                _language_id[code] = None
+        return _language_id[code]
 
     async def _search(query: str, lang: str, limit: int) -> list[dict[str, Any]]:
         """One name-search, shaped down to what picks an exercise."""
+        language_id = await _language_id_for(lang)
         results = await client.paginate(
             "exerciseinfo/",
             params={"name__search": query, "language__code": lang},
@@ -39,9 +58,11 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
             translations = [
                 t for t in (ex.get("translations") or []) if isinstance(t, dict) and t.get("name")
             ]
+            in_language = [t for t in translations if t.get("language") == language_id]
+            pool = in_language or translations
             match = next(
-                (t for t in translations if q_lower in (t.get("name") or "").lower()),
-                translations[0] if translations else None,
+                (t for t in pool if q_lower in (t.get("name") or "").lower()),
+                pool[0] if pool else None,
             )
             shaped.append({
                 "id": ex.get("id"),
@@ -74,7 +95,7 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     async def search_exercises_batch(
         queries: list[str],
         language: Annotated[str | None, Field(pattern=r"^[a-z]{2}$")] = None,
-        limit_per_query: Annotated[int, Field(ge=1, le=10)] = 3,
+        limit_per_query: Annotated[int, Field(ge=1, le=10)] = 2,
     ) -> dict[str, Any]:
         """Batch variant: resolve many exercise names at once.
 
@@ -248,6 +269,7 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
             results = await client.paginate("exerciseinfo/", params=params, limit=limit)
         except WgerError as exc:
             return [err(exc)]
+        language_id = await _language_id_for(params["language__code"])
         shaped: list[dict[str, Any]] = []
         for ex in results:
             if not isinstance(ex, dict):
@@ -255,9 +277,13 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
             translations = [
                 t for t in (ex.get("translations") or []) if isinstance(t, dict) and t.get("name")
             ]
+            # Same rule as search_exercises: never hand back a name in a language
+            # the caller did not ask for when one in that language exists.
+            in_language = [t for t in translations if t.get("language") == language_id]
+            pool = in_language or translations
             shaped.append({
                 "id": ex.get("id"),
-                "name": (translations[0].get("name") if translations else None),
+                "name": (pool[0].get("name") if pool else None),
                 "category": (ex.get("category") or {}).get("name"),
                 "equipment": [e.get("name") for e in (ex.get("equipment") or [])],
                 "muscles": [m.get("name") for m in (ex.get("muscles") or [])],

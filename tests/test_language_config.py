@@ -214,6 +214,11 @@ async def test_exercise_search_language_resolution(
         args["language"] = passed
     async with client:
         with respx.mock(base_url=WGER_API) as router:
+            # search now resolves the language code to wger's numeric id so it can
+            # pick the translation in the requested language
+            router.get("/language/").respond(
+                json={"count": 1, "next": None, "results": [{"id": 2, "short_name": "en"}]}
+            )
             route = router.get("/exerciseinfo/").respond(json={"results": [], "next": None})
             await mcp.call_tool("search_exercises", args)
     assert route.calls.last.request.url.params["language__code"] == expected
