@@ -14,20 +14,6 @@ from .common import bad_request, err
 _NUTRISCORE = r"^[A-Ea-e]$"
 
 
-def _shape_images(images: Any) -> list[dict[str, Any]]:
-    """Flatten an exercise's images, surfacing the 2.6 small/medium thumbnails."""
-    out: list[dict[str, Any]] = []
-    for img in images or []:
-        if not isinstance(img, dict):
-            continue
-        out.append({
-            "image": img.get("image"),
-            "is_main": img.get("is_main"),
-            "thumbnails": img.get("thumbnails"),
-        })
-    return out
-
-
 def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     default_language = settings.default_language
 
@@ -38,6 +24,9 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
         limit: Annotated[int, Field(ge=1, le=50)] = 10,
     ) -> list[dict[str, Any]]:
         """Search the wger exercise database by name.
+
+        Returns id, name, category and equipment — enough to pick an exercise.
+        Call get_exercise for images, translations and the full record.
 
         ``language`` is an ISO 639-1 code ('en', 'pl', 'de', ...); it defaults to
         the server's ``DEFAULT_LANGUAGE``.
@@ -67,14 +56,9 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
             )
             shaped.append({
                 "id": ex.get("id"),
-                "uuid": ex.get("uuid"),
                 "name": (match or {}).get("name"),
                 "category": (ex.get("category") or {}).get("name"),
                 "equipment": [e.get("name") for e in (ex.get("equipment") or [])],
-                "images": _shape_images(ex.get("images")),
-                "translations": [
-                    {"language": t.get("language"), "name": t.get("name")} for t in translations
-                ],
             })
         return shaped
 
@@ -233,7 +217,6 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
             ]
             shaped.append({
                 "id": ex.get("id"),
-                "uuid": ex.get("uuid"),
                 "name": (translations[0].get("name") if translations else None),
                 "category": (ex.get("category") or {}).get("name"),
                 "equipment": [e.get("name") for e in (ex.get("equipment") or [])],

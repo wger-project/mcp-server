@@ -1,0 +1,116 @@
+"""Exercise search returns a lean shape: enough to pick an id, nothing more."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import respx
+from mcp.server.fastmcp import FastMCP
+
+from wger_mcp.config import Settings
+from wger_mcp.tools import exercises
+from wger_mcp.wger_client import WgerClient
+
+API = "https://wger.test/api/v2"
+
+
+class _StubProvider:
+    async def authorization_header(self) -> str:
+        return "Token dev"
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _settings() -> Settings:
+    return Settings(  # type: ignore[call-arg]
+        wger_base_url="https://wger.test",
+        mcp_auth="none",
+        wger_dev_token="dev",
+    )
+
+
+def _register() -> FastMCP:
+    mcp = FastMCP("test")
+    exercises.register(mcp, WgerClient(API, _StubProvider()), _settings())
+    return mcp
+
+
+def _results(raw: Any) -> list[dict[str, Any]]:
+    payload = raw[1] if isinstance(raw, tuple) else raw
+    if isinstance(payload, dict) and "result" in payload:
+        payload = payload["result"]
+    return payload  # type: ignore[return-value]
+
+
+# One hit, carrying the fields a real wger response carries. Sixteen translations
+# is not unusual for a common lift.
+def _exercise() -> dict[str, Any]:
+    return {
+        "id": 73,
+        "uuid": "0a1b2c3d-0000-0000-0000-000000000000",
+        "category": {"id": 11, "name": "Chest"},
+        "equipment": [{"id": 1, "name": "Barbell"}],
+        "muscles": [{"id": 4, "name": "Pectoralis major"}],
+        "images": [{"image": "/media/x.png", "is_main": True, "thumbnails": {"small": "/s.png"}}],
+        "translations": [
+            {"language": n, "name": f"Bench Press {n}", "description": "<p>lorem ipsum</p>"}
+            for n in range(1, 17)
+        ],
+    }
+
+
+async def test_search_omits_translations_images_and_uuid() -> None:
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [_exercise()]}
+        )
+        out = _results(await mcp.call_tool("search_exercises", {"query": "bench press"}))
+
+    assert len(out) == 1
+    assert set(out[0]) == {"id", "name", "category", "equipment"}
+    assert out[0]["id"] == 73
+    assert out[0]["category"] == "Chest"
+    assert out[0]["equipment"] == ["Barbell"]
+
+
+async def test_search_payload_stays_small() -> None:
+    """The point of the change: a search result must not carry a translation
+    table into the model's context."""
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [_exercise()]}
+        )
+        out = _results(await mcp.call_tool("search_exercises", {"query": "bench press"}))
+
+    rendered = json.dumps(out)
+    assert "lorem ipsum" not in rendered
+    assert "uuid" not in rendered
+    assert len(rendered) < 200
+
+
+async def test_filter_search_keeps_muscles_but_drops_uuid() -> None:
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [_exercise()]}
+        )
+        out = _results(await mcp.call_tool("search_exercises_by_filter", {"equipment_id": "1"}))
+
+    assert set(out[0]) == {"id", "name", "category", "equipment", "muscles"}
+    assert out[0]["muscles"] == ["Pectoralis major"]
+
+
+async def test_get_exercise_still_returns_everything() -> None:
+    """Detail is not lost, only moved: search picks the id, get_exercise expands it."""
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        mock.get("/exerciseinfo/73/").respond(json=_exercise())
+        out = _results(await mcp.call_tool("get_exercise", {"exercise_id": "73"}))
+
+    assert out["uuid"]
+    assert len(out["translations"]) == 16
+    assert out["images"]
