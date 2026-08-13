@@ -114,3 +114,48 @@ async def test_get_exercise_still_returns_everything() -> None:
     assert out["uuid"]
     assert len(out["translations"]) == 16
     assert out["images"]
+
+
+# ---------- batch search ----------
+
+
+async def test_batch_resolves_many_names_in_one_call() -> None:
+    """One call instead of one inference round trip per exercise."""
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [_exercise()]}
+        )
+        out = _results(
+            await mcp.call_tool(
+                "search_exercises_batch",
+                {"queries": ["bench press", "cable fly", "lateral raise"]},
+            )
+        )
+
+    assert out["count"] == 3
+    assert set(out["results"]) == {"bench press", "cable fly", "lateral raise"}
+    first = out["results"]["bench press"][0]
+    assert set(first) == {"id", "name", "category", "equipment"}
+
+
+async def test_batch_collapses_duplicate_queries() -> None:
+    mcp = _register()
+    with respx.mock(base_url=API) as mock:
+        route = mock.get("/exerciseinfo/").respond(
+            json={"count": 1, "next": None, "results": [_exercise()]}
+        )
+        out = _results(
+            await mcp.call_tool(
+                "search_exercises_batch", {"queries": ["bench press", "bench press"]}
+            )
+        )
+
+    assert out["count"] == 1
+    assert route.call_count == 1
+
+
+async def test_batch_of_nothing_is_not_an_error() -> None:
+    mcp = _register()
+    out = _results(await mcp.call_tool("search_exercises_batch", {"queries": []}))
+    assert out == {"count": 0, "results": {}}

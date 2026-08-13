@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -14,34 +15,22 @@ from .common import bad_request, err
 _NUTRISCORE = r"^[A-Ea-e]$"
 
 
+# wger's search is one request per name. Filling a training day means a dozen
+# of them, so the batch tool runs them concurrently — same cap as the Open Food
+# Facts batch lookup.
+_BATCH_CONCURRENCY = 4
+
+
 def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
     default_language = settings.default_language
 
-    @mcp.tool()
-    async def search_exercises(
-        query: Annotated[str, Field(min_length=2)],
-        language: Annotated[str | None, Field(pattern=r"^[a-z]{2}$")] = None,
-        limit: Annotated[int, Field(ge=1, le=50)] = 10,
-    ) -> list[dict[str, Any]]:
-        """Search the wger exercise database by name.
-
-        Returns id, name, category and equipment — enough to pick an exercise.
-        Call get_exercise for images, translations and the full record.
-
-        ``language`` is an ISO 639-1 code ('en', 'pl', 'de', ...); it defaults to
-        the server's ``DEFAULT_LANGUAGE``.
-        """
-        try:
-            results = await client.paginate(
-                "exerciseinfo/",
-                params={
-                    "name__search": query,
-                    "language__code": language or default_language,
-                },
-                limit=limit,
-            )
-        except WgerError as exc:
-            return [err(exc)]
+    async def _search(query: str, lang: str, limit: int) -> list[dict[str, Any]]:
+        """One name-search, shaped down to what picks an exercise."""
+        results = await client.paginate(
+            "exerciseinfo/",
+            params={"name__search": query, "language__code": lang},
+            limit=limit,
+        )
         q_lower = query.lower()
         shaped: list[dict[str, Any]] = []
         for ex in results:
@@ -61,6 +50,57 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
                 "equipment": [e.get("name") for e in (ex.get("equipment") or [])],
             })
         return shaped
+
+    @mcp.tool()
+    async def search_exercises(
+        query: Annotated[str, Field(min_length=2)],
+        language: Annotated[str | None, Field(pattern=r"^[a-z]{2}$")] = None,
+        limit: Annotated[int, Field(ge=1, le=50)] = 10,
+    ) -> list[dict[str, Any]]:
+        """Search the wger exercise database by name.
+
+        Returns id, name, category and equipment — enough to pick an exercise.
+        Call get_exercise for images, translations and the full record.
+
+        ``language`` is an ISO 639-1 code ('en', 'pl', 'de', ...); it defaults to
+        the server's ``DEFAULT_LANGUAGE``.
+        """
+        try:
+            return await _search(query, language or default_language, limit)
+        except WgerError as exc:
+            return [err(exc)]
+
+    @mcp.tool()
+    async def search_exercises_batch(
+        queries: list[str],
+        language: Annotated[str | None, Field(pattern=r"^[a-z]{2}$")] = None,
+        limit_per_query: Annotated[int, Field(ge=1, le=10)] = 3,
+    ) -> dict[str, Any]:
+        """Batch variant: resolve many exercise names at once.
+
+        Returns a map keyed by query, each holding the top matches in the same
+        shape as search_exercises. Fetches run concurrently (capped at 4 in
+        flight) and duplicate queries are collapsed.
+
+        Use this when building or filling a training day. Searching one name per
+        call costs an inference round trip per exercise, which is the difference
+        between filling a day in one turn and running out of them.
+        """
+        if not queries:
+            return {"count": 0, "results": {}}
+        lang = language or default_language
+        unique = list(dict.fromkeys(q for q in queries if q and len(q) >= 2))
+        sem = asyncio.Semaphore(_BATCH_CONCURRENCY)
+
+        async def _one(q: str) -> tuple[str, Any]:
+            async with sem:
+                try:
+                    return q, await _search(q, lang, limit_per_query)
+                except WgerError as exc:
+                    return q, [err(exc)]
+
+        results = dict(await asyncio.gather(*[_one(q) for q in unique]))
+        return {"count": len(results), "results": results}
 
     @mcp.tool()
     async def get_exercise(exercise_id: str) -> dict[str, Any]:
