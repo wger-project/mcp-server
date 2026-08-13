@@ -162,3 +162,52 @@ async def test_rir_is_optional() -> None:
 
     assert not r["rir"].called
     assert _payload(r["entry"])["weight_unit"] == 1
+
+
+# ---------- set_slot_entry_config ----------
+
+
+async def test_setting_a_weight_can_set_its_unit() -> None:
+    """The unit lives on the entry, so setting a weight alone leaves it
+    interpreted in whatever unit the entry already had."""
+    mcp = _register(routines)
+    with respx.mock(base_url=API) as mock:
+        patch = mock.patch("/slot-entry/6/").respond(json={"id": 6})
+        post = mock.post("/weight-config/").respond(json={"id": 9})
+        await mcp.call_tool(
+            "set_slot_entry_config",
+            {"slot_entry_id": "6", "kind": "weight", "value": 175, "weight_unit": "lb"},
+        )
+
+    assert _payload(patch) == {"weight_unit": 2}
+    assert _payload(post)["value"] == 175
+
+
+async def test_unit_is_refused_for_a_non_weight_kind() -> None:
+    mcp = _register(routines)
+    with respx.mock(base_url=API, assert_all_called=False) as mock:
+        patch = mock.patch("/slot-entry/6/").respond(json={"id": 6})
+        post = mock.post("/repetitions-config/").respond(json={"id": 9})
+        out = _result(
+            await mcp.call_tool(
+                "set_slot_entry_config",
+                {"slot_entry_id": "6", "kind": "reps", "value": 10, "weight_unit": "lb"},
+            )
+        )
+
+    assert not patch.called and not post.called
+    assert "weight_unit" in json.dumps(out)
+
+
+async def test_weight_without_unit_touches_only_the_config() -> None:
+    mcp = _register(routines)
+    with respx.mock(base_url=API, assert_all_called=False) as mock:
+        patch = mock.patch("/slot-entry/6/").respond(json={"id": 6})
+        post = mock.post("/weight-config/").respond(json={"id": 9})
+        await mcp.call_tool(
+            "set_slot_entry_config",
+            {"slot_entry_id": "6", "kind": "weight", "value": 60},
+        )
+
+    assert not patch.called
+    assert post.called

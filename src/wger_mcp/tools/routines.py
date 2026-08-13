@@ -430,14 +430,38 @@ def register(mcp: FastMCP, client: WgerClient, settings: Settings) -> None:
         operation: str = "r",
         step: str = "abs",
         repeat: bool = False,
+        weight_unit: str | None = None,
     ) -> dict[str, Any]:
         """Create a per-iteration config record for a slot entry.
         kind: one of sets, reps, weight, rir, rest, max_sets, max_reps,
         max_weight, max_rir, max_rest. operation 'r' = replace, 'a' = add,
-        's' = subtract. step 'abs' or 'percent'."""
+        's' = subtract. step 'abs' or 'percent'.
+
+        For kind='weight', pass weight_unit ('kg' or 'lb') to record what the
+        number means. wger stores the unit on the slot ENTRY rather than on the
+        weight config, so this patches the entry for you — otherwise a weight
+        set here is silently interpreted in whatever unit the entry already had.
+        """
         path = SLOT_CONFIG_PATHS.get(kind)
         if not path:
             return _unknown_kind(kind)
+        if weight_unit is not None:
+            if kind not in ("weight", "max_weight"):
+                return bad_request(
+                    f"weight_unit applies to kind 'weight' or 'max_weight', not '{kind}'"
+                )
+            if weight_unit not in WEIGHT_UNITS:
+                return bad_request(
+                    f"unknown weight_unit '{weight_unit}'; expected one of "
+                    f"{', '.join(WEIGHT_UNITS)}"
+                )
+            try:
+                await client.patch(
+                    f"slot-entry/{slot_entry_id}/",
+                    json={"weight_unit": WEIGHT_UNITS[weight_unit]},
+                )
+            except WgerError as exc:
+                return err(exc) | {"stage": "slot-entry weight_unit"}
         payload: dict[str, Any] = {
             "slot_entry": slot_entry_id,
             "iteration": iteration,
