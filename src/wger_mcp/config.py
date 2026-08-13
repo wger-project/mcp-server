@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     # DNS rebinding protection. Empty list disables the check.
     allowed_hosts: list[str] = Field(default_factory=list)
 
+    # ---------- tool surface ----------
+    # Tool groups to register, by module name (see wger_mcp.tools.TOOL_GROUPS).
+    # Empty = every group. Useful for agents driven by small local models, which
+    # lose accuracy as the tool count grows, and for single-purpose agents that
+    # need only part of the API. An unknown name is rejected at startup.
+    mcp_tools: list[str] = Field(default_factory=list)
+
     # ---------- localisation ----------
     # Default ISO 639-1 language for content lookups. Used as the default for
     # the exercise-search tools' ``language`` argument and to pick which
@@ -133,6 +140,11 @@ class Settings(BaseSettings):
     def _ensure_leading_slash(cls, v: str) -> str:
         v = v.strip()
         return v if v.startswith("/") else "/" + v
+
+    @field_validator("mcp_tools", mode="after")
+    @classmethod
+    def _normalize_tools(cls, v: list[str]) -> list[str]:
+        return [t.strip().lower() for t in v if t.strip()]
 
     @field_validator("default_language", mode="after")
     @classmethod
@@ -211,6 +223,7 @@ _CSV_VARS = (
     "MCP_OIDC_ALGORITHMS",
     "MCP_OIDC_ALLOWED_USERS",
     "ALLOWED_HOSTS",
+    "MCP_TOOLS",
 )
 
 

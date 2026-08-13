@@ -53,6 +53,7 @@ _CLEARED_VARS = (
     "MCP_PUBLIC_URL",
     "ALLOWED_HOSTS",
     "DEFAULT_LANGUAGE",
+    "MCP_TOOLS",
 )
 
 

@@ -147,6 +147,18 @@ Safe only when bound to localhost for local development. Never expose it to a ne
 
 Tools are grouped by domain. Each lives in its own module under [`src/wger_mcp/tools/`](src/wger_mcp/tools/).
 
+### Registering only some groups
+
+All 81 tools are registered by default. `MCP_TOOLS` narrows that to a comma-separated list of groups:
+
+```bash
+MCP_TOOLS=nutrition,off,profile     # a food-logging agent
+```
+
+Valid group names are the module names: `profile`, `routines`, `workout_logs`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off`. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
+
+This matters most for agents driven by small local models, whose tool-selection accuracy falls off as the surface grows, and where every schema is spent from a modest context window. It is also useful for a single-purpose agent that has no business writing routines.
+
 ### Profile
 
 | Tool | Description |
