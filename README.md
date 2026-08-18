@@ -306,7 +306,7 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 
 | Tool | Description |
 |------|-------------|
-| `search_ingredients(query, language, limit, nutriscore?, nutriscore_better_than?, nutriscore_at_worst?)` | Find foods by name. Optional Nutri-Score filters (wger 2.6): exact grade, or `nutriscore_better_than='C'` (A/B only), or `nutriscore_at_worst='C'` (C or better) |
+| `search_ingredients(query, language, limit, nutriscore?, nutriscore_better_than?, nutriscore_at_worst?)` | Find foods by name; returns macros, `fiber` and the `nutriscore` grade. Optional Nutri-Score filters (wger 2.6): exact grade, or `nutriscore_better_than='C'` (A/B only), or `nutriscore_at_worst='C'` (C or better) |
 | `search_ingredient_by_barcode(barcode, limit?)` | Exact lookup by EAN/UPC (`?code=`) — preferred over name search |
 | `get_ingredient(ingredient_id)` | Full ingredient detail (macros per 100 g) |
 
@@ -317,14 +317,15 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 | Tool | Description |
 |------|-------------|
 | `list_nutrition_plans` / `get_nutrition_plan(plan_id)` | Read nutrition plans |
-| `create_nutrition_plan(description?, only_logging?, goal_energy?, goal_protein?, goal_carbohydrates?, goal_fat?)` | Create a plan (returns `plan_id`) |
+| `create_nutrition_plan(description?, only_logging?, goal_energy?, goal_protein?, goal_carbohydrates?, goal_fat?, goal_fiber?, start?, end?)` | Create a plan (returns `plan_id`). `start`/`end` date the block; `goal_fiber` sits alongside the macro goals |
 | `update_nutrition_plan(plan_id, ...)` / `delete_nutrition_plan(plan_id)` | Patch / delete a plan (cascade) |
 | `create_meal(plan_id, name, order?, time?)` | Add a meal to a plan |
 | `create_recipe(plan_id, name, order?)` / `get_recipe(recipe_id)` / `add_ingredient_to_recipe(recipe_id, ingredient_id, amount_g, order?, weight_unit_id?)` | Recipes (semantic aliases over `meal/` + `mealitem/` — wger has no separate Recipe entity) |
-| `log_ingredient(plan_id, ingredient_id, amount_g, when?, meal_id?)` | Nutrition diary entry. `when` takes a full timestamp (`2026-07-21T07:30:00+02:00`, offset preserved) or a bare date (anchored at 12:00); omit it to let wger use the current time |
-| `update_log_item(log_item_id, amount_g?, when?, ingredient_id?, meal_id?)` | Patch a diary entry — the way to correct an entry's time or amount in place |
+| `log_ingredient(plan_id, ingredient_id, amount_g, when?, meal_id?, weight_unit_id?)` | Nutrition diary entry. `when` takes a full timestamp (`2026-07-21T07:30:00+02:00`, offset preserved) or a bare date (anchored at 12:00); omit it to let wger use the current time. With `weight_unit_id` the amount counts portions instead of grams — two slices, not two grams; the id is checked against the ingredient first |
+| `list_ingredient_units(ingredient_id, limit?)` | The portions wger knows for one ingredient (slice, cup, can) with the grams each weighs — the only way to discover the ids `weight_unit_id` takes |
+| `update_log_item(log_item_id, amount_g?, when?, ingredient_id?, meal_id?, weight_unit_id?, plan_id?)` | Patch a diary entry — the way to correct an entry's time or amount in place. `plan_id` moves it to another plan |
 | `list_log_items(when?, plan_id?, limit?)` / `delete_log_item(log_item_id)` | List / remove diary entries |
-| `nutrition_summary(when?, plan_id?)` | Daily kcal/protein/carbs/fat from diary entries |
+| `nutrition_summary(when?, plan_id?)` | Daily kcal/protein/carbs/fat/fiber from diary entries. Entries logged in a portion unit are scaled by what that unit weighs, as wger does |
 | `calculate_daily_calories(weight_kg?, height_cm?, age?, sex?, activity_level?, goal?, protein_g_per_kg?, fat_pct_of_kcal?, apply_to_profile?)` | Mifflin-St Jeor TDEE + macro split. All physical inputs auto-fill from `userprofile/` + latest `weightentry/`. `apply_to_profile=True` PATCHes the result into `userprofile.calories` |
 
 ### Analytics

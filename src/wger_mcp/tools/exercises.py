@@ -58,6 +58,10 @@ def _relevance(name: str, query: str) -> tuple[int, int]:
 
 
 def _shape_ingredient(ing: dict[str, Any], *, with_code: bool = False) -> dict[str, Any]:
+    # nutriscore earns its place because search_ingredients filters on it: a
+    # search that can ask for "C or better" and then not say what it found
+    # makes the caller fetch each result again to see. fiber is here because a
+    # plan can set goal_fiber, so it is a number people pick foods by.
     out = {
         "id": ing.get("id"),
         "uuid": ing.get("uuid"),
@@ -66,6 +70,8 @@ def _shape_ingredient(ing: dict[str, Any], *, with_code: bool = False) -> dict[s
         "protein": ing.get("protein"),
         "carbohydrates": ing.get("carbohydrates"),
         "fat": ing.get("fat"),
+        "fiber": ing.get("fiber"),
+        "nutriscore": ing.get("nutriscore"),
         "brand": ing.get("brand"),
     }
     if with_code:

@@ -15,6 +15,10 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from wger_api_client import models as api_models
 from wger_api_client.api.ingredient import ingredient_retrieve
+from wger_api_client.api.ingredientweightunit import (
+    ingredientweightunit_list,
+    ingredientweightunit_retrieve,
+)
 from wger_api_client.api.meal import meal_create, meal_retrieve
 from wger_api_client.api.mealitem import mealitem_create
 from wger_api_client.api.nutritiondiary import (
@@ -39,6 +43,7 @@ from wger_api_client.types import UNSET
 from ..api_client import paginate
 from ..config import Settings
 from .common import (
+    ToolInputError,
     api_err,
     api_list_tool,
     api_tool,
@@ -83,11 +88,25 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         goal_protein: Annotated[float | None, Field(ge=0, le=2000)] = None,
         goal_carbohydrates: Annotated[float | None, Field(ge=0, le=2000)] = None,
         goal_fat: Annotated[float | None, Field(ge=0, le=2000)] = None,
+        goal_fiber: Annotated[float | None, Field(ge=0, le=500)] = None,
+        start: date | None = None,
+        end: date | None = None,
     ) -> dict[str, Any]:
-        """Create a nutrition plan. Returns the new plan including its id."""
+        """Create a nutrition plan. Returns the new plan including its id.
+
+        start and end date the plan, so a cut or a bulk is a block with a
+        beginning and an end rather than an open-ended description. Both are
+        optional; wger leaves an undated plan running.
+
+        goal_fiber sits alongside the macro goals — wger tracks fiber as a
+        target of its own, and nutrition_summary reports it.
+        """
         body = api_models.NutritionPlanRequest(
             description=description,
             only_logging=only_logging,
+            start=opt(start),
+            end=opt(end),
+            goal_fiber=int(goal_fiber) if goal_fiber is not None else UNSET,
             goal_energy=int(goal_energy) if goal_energy is not None else UNSET,
             goal_protein=int(goal_protein) if goal_protein is not None else UNSET,
             goal_carbohydrates=(
@@ -108,11 +127,20 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         goal_protein: Annotated[float | None, Field(ge=0, le=2000)] = None,
         goal_carbohydrates: Annotated[float | None, Field(ge=0, le=2000)] = None,
         goal_fat: Annotated[float | None, Field(ge=0, le=2000)] = None,
+        goal_fiber: Annotated[float | None, Field(ge=0, le=500)] = None,
+        start: date | None = None,
+        end: date | None = None,
     ) -> dict[str, Any]:
-        """Patch a nutrition plan. Only provided fields are sent."""
+        """Patch a nutrition plan. Only provided fields are sent.
+
+        See create_nutrition_plan for start / end / goal_fiber.
+        """
         body = api_models.PatchedNutritionPlanRequest(
             description=opt(description),
             only_logging=opt(only_logging),
+            start=opt(start),
+            end=opt(end),
+            goal_fiber=int(goal_fiber) if goal_fiber is not None else UNSET,
             goal_energy=int(goal_energy) if goal_energy is not None else UNSET,
             goal_protein=int(goal_protein) if goal_protein is not None else UNSET,
             goal_carbohydrates=(
@@ -204,6 +232,44 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     # docs/adr/0001-multi-user-auth-via-oidc-token-exchange.md.
 
     @mcp.tool()
+    @api_list_tool
+    async def list_ingredient_units(
+        ingredient_id: str,
+        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    ) -> list[dict[str, Any]]:
+        """List the human-sized portions wger knows for an ingredient — slice,
+        cup, can — each with the grams it weighs.
+
+        Units belong to one ingredient: a slice of bread is not a slice of
+        cheese. These ids are what log_ingredient and add_ingredient_to_recipe
+        take as weight_unit_id, and there is no other way to discover them.
+        """
+        return await paginate(
+            ingredientweightunit_list.asyncio,
+            client=api,
+            limit=limit,
+            ingredient=as_int(ingredient_id, "ingredient_id"),
+        )
+
+    async def _checked_unit(weight_unit_id: str, ingredient: int) -> int:
+        """The unit id, once it is confirmed to belong to this ingredient.
+
+        wger's foreign key does not check that pairing, so a slice-of-bread id
+        on a block of cheese is stored happily and silently multiplies every
+        macro by that unit's weight. One lookup is cheaper than a diary nobody
+        can trust.
+        """
+        unit = as_int(weight_unit_id, "weight_unit_id")
+        found = await ingredientweightunit_retrieve.asyncio(id=unit, client=api)
+        if found.ingredient != ingredient:
+            raise ToolInputError(
+                f"weight_unit_id {weight_unit_id} belongs to ingredient "
+                f"{found.ingredient}, not {ingredient}; "
+                "list_ingredient_units gives the units of this ingredient"
+            )
+        return unit
+
+    @mcp.tool()
     @api_tool
     async def log_ingredient(
         plan_id: str,
@@ -211,6 +277,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         amount_g: Annotated[float, Field(gt=0, le=10000)],
         when: date | datetime | None = None,
         meal_id: str | None = None,
+        weight_unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Log eaten food against a plan (logitem).
 
@@ -223,13 +290,21 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
 
         ``meal_id`` optionally attributes the entry to a specific meal of the
         plan; omit it for a standalone diary entry.
+
+        ``weight_unit_id`` logs a portion instead of a weight: pass a unit from
+        list_ingredient_units and ``amount_g`` counts those units rather than
+        grams — two slices, not two grams. The id is checked against the
+        ingredient before the entry is written.
         """
+        ingredient = as_int(ingredient_id, "ingredient_id")
+        unit = await _checked_unit(weight_unit_id, ingredient) if weight_unit_id else None
         body = api_models.LogItemRequest(
             plan=as_uuid(plan_id, "plan_id"),
-            ingredient=as_int(ingredient_id, "ingredient_id"),
+            ingredient=ingredient,
             amount=as_decimal(amount_g),
             datetime_=opt(at_noon(when)),
             meal=as_uuid(meal_id, "meal_id") if meal_id is not None else UNSET,
+            weight_unit=opt(unit),
         )
         entry = await nutritiondiary_create.asyncio(client=api, body=body)
         return entry.to_dict()
@@ -242,13 +317,27 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         when: date | datetime | None = None,
         ingredient_id: str | None = None,
         meal_id: str | None = None,
+        weight_unit_id: str | None = None,
+        plan_id: str | None = None,
     ) -> dict[str, Any]:
         """Patch an existing nutrition-diary entry.
 
         Use this to correct an entry's time or amount in place. ``when`` takes
         the same forms as in ``log_ingredient``; only the fields you pass are
         changed.
+
+        ``weight_unit_id`` switches the entry between grams and portions. It is
+        only checked against the ingredient when ``ingredient_id`` is passed as
+        well, since the stored one is not read back here. ``plan_id`` moves the
+        entry to another plan.
         """
+        unit: int | None = None
+        if weight_unit_id is not None:
+            unit = (
+                await _checked_unit(weight_unit_id, as_int(ingredient_id, "ingredient_id"))
+                if ingredient_id is not None
+                else as_int(weight_unit_id, "weight_unit_id")
+            )
         body = api_models.PatchedLogItemRequest(
             amount=as_decimal(amount_g) if amount_g is not None else UNSET,
             datetime_=opt(at_noon(when)),
@@ -256,6 +345,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 as_int(ingredient_id, "ingredient_id") if ingredient_id is not None else UNSET
             ),
             meal=as_uuid(meal_id, "meal_id") if meal_id is not None else UNSET,
+            weight_unit=opt(unit),
+            plan=opt(as_uuid(plan_id, "plan_id") if plan_id is not None else None),
         )
         require_fields(body)
         updated = await nutritiondiary_partial_update.asyncio(
@@ -490,8 +581,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         when: date | None = None,
         plan_id: str | None = None,
     ) -> dict[str, Any]:
-        """Sum kcal/protein/carbs/fat from diary entries for a date. Per entry,
-        fetches the ingredient's macros (per 100 g) and scales by amount_g."""
+        """Sum kcal/protein/carbs/fat/fiber from diary entries for a date. Per
+        entry, fetches the ingredient's macros (per 100 g) and scales by the
+        entry's weight.
+
+        An entry logged in a portion unit (two slices, one cup) carries a count
+        rather than a weight, so its unit is fetched and the count multiplied by
+        what that unit weighs — wger's own rule, amount x unit.gram. Entries
+        written from the wger app routinely use units, so a summary that read
+        the count as grams was reporting a fraction of the real intake."""
         target = when or date.today()
         filters: dict[str, Any] = {"datetime_date": target}
         if plan_id is not None:
@@ -501,12 +599,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 return bad_request(str(exc))
         entries = await paginate(nutritiondiary_list.asyncio, client=api, limit=500, **filters)
 
-        # Fan out distinct ingredient fetches concurrently.
+        # Fan out distinct ingredient and unit fetches concurrently.
         ing_ids: set[int] = set()
+        unit_ids: set[int] = set()
         for entry in entries:
             ing_id = entry.get("ingredient")
             if ing_id and float(entry.get("amount") or 0) > 0:
                 ing_ids.add(ing_id)
+                if unit_id := entry.get("weight_unit"):
+                    unit_ids.add(unit_id)
 
         sem = asyncio.Semaphore(_INGREDIENT_CONCURRENCY)
 
@@ -518,9 +619,22 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 except (UnexpectedStatus, httpx.HTTPError) as exc:
                     return iid, {"_err": api_err(exc)}
 
-        cache: dict[int, dict[str, Any]] = dict(await asyncio.gather(*[_fetch(i) for i in ing_ids]))
+        async def _fetch_unit(uid: int) -> tuple[int, dict[str, Any]]:
+            async with sem:
+                try:
+                    unit = await ingredientweightunit_retrieve.asyncio(id=uid, client=api)
+                    return uid, unit.to_dict()
+                except (UnexpectedStatus, httpx.HTTPError) as exc:
+                    return uid, {"_err": api_err(exc)}
 
-        totals = {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+        cache, units = await asyncio.gather(
+            asyncio.gather(*[_fetch(i) for i in ing_ids]),
+            asyncio.gather(*[_fetch_unit(u) for u in unit_ids]),
+        )
+        cache = dict(cache)
+        units = dict(units)
+
+        totals = {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0}
         items: list[dict[str, Any]] = []
         for entry in entries:
             ing_id = entry.get("ingredient")
@@ -537,27 +651,52 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                     }
                 )
                 continue
-            factor = amount / 100.0
+
+            # A unit whose weight could not be read must not fall back to
+            # grams: that is the very miscount this lookup exists to prevent.
+            unit_id = entry.get("weight_unit")
+            unit = units.get(unit_id) if unit_id else None
+            if unit_id and (unit is None or "_err" in unit):
+                items.append(
+                    {
+                        "entry_id": entry.get("id"),
+                        "ingredient_id": ing_id,
+                        "ingredient_name": ing.get("name"),
+                        "error": (unit or {}).get("_err")
+                        or bad_request(f"weight unit {unit_id} could not be read"),
+                    }
+                )
+                continue
+            grams = amount * float(unit.get("gram") or 0) if unit else amount
+
+            factor = grams / 100.0
             kcal = float(ing.get("energy") or 0) * factor
             prot = float(ing.get("protein") or 0) * factor
             carb = float(ing.get("carbohydrates") or 0) * factor
             fat = float(ing.get("fat") or 0) * factor
+            fiber = float(ing.get("fiber") or 0) * factor
             totals["kcal"] += kcal
             totals["protein_g"] += prot
             totals["carbs_g"] += carb
             totals["fat_g"] += fat
-            items.append(
-                {
-                    "entry_id": entry.get("id"),
-                    "ingredient_id": ing_id,
-                    "ingredient_name": ing.get("name"),
-                    "amount_g": amount,
-                    "kcal": round(kcal, 1),
-                    "protein_g": round(prot, 1),
-                    "carbs_g": round(carb, 1),
-                    "fat_g": round(fat, 1),
-                }
-            )
+            totals["fiber_g"] += fiber
+            item = {
+                "entry_id": entry.get("id"),
+                "ingredient_id": ing_id,
+                "ingredient_name": ing.get("name"),
+                "amount_g": round(grams, 1),
+                "kcal": round(kcal, 1),
+                "protein_g": round(prot, 1),
+                "carbs_g": round(carb, 1),
+                "fat_g": round(fat, 1),
+                "fiber_g": round(fiber, 1),
+            }
+            if unit:
+                # What the trainee actually logged, so the gram figure above
+                # can be checked rather than taken on faith
+                item["logged_amount"] = amount
+                item["logged_unit"] = unit.get("name")
+            items.append(item)
         return {
             "date": target.isoformat(),
             "totals": {k: round(v, 1) for k, v in totals.items()},
