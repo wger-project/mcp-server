@@ -228,15 +228,29 @@ Tools are grouped by domain. Each lives in its own module under [`src/wger_mcp/t
 
 ### Registering only some groups
 
-All 78 tools are registered by default. `MCP_TOOLS` narrows that to a comma-separated list of groups:
+All 85 tools are registered by default, which is about **18.6k tokens** of schema in every request before the conversation starts. `MCP_TOOLS` narrows that to a comma-separated list of groups:
 
 ```bash
-MCP_TOOLS=nutrition,off,profile     # a food-logging agent
+MCP_TOOLS=nutrition,off,exercises,profile
 ```
 
-Valid group names are the module names: `profile`, `routines`, `workout_logs`, `workout_sessions`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off`. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
+Valid names are the module names — `profile`, `routines_read`, `routines_write`, `workout_logs`, `workout_sessions`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off` — plus `routines`, which means both routine halves. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
 
 This matters most for agents driven by small local models, whose tool-selection accuracy falls off as the surface grows, and where every schema is spent from a modest context window. It is also useful for a single-purpose agent that has no business writing routines.
+
+#### Profiles that cover most agents
+
+Measured, not estimated: the token figures are the serialised tool list divided by four.
+
+| Agent | `MCP_TOOLS` | Tools | ~Tokens |
+|------|-------------|------:|--------:|
+| Everything (default) | *(unset)* | 85 | 18.6k |
+| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 11.5k |
+| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 6.5k |
+| Food logging | `nutrition,off,exercises,profile` | 29 | 6.6k |
+| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 20 | 3.0k |
+
+The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.3k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.2k) creates and changes it. An agent that follows a plan needs only the first, which is nearly a quarter of the whole surface saved. `routines` remains valid and still means both.
 
 ### Profile
 

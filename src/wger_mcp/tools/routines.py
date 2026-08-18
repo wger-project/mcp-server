@@ -288,6 +288,20 @@ def _requirements(rules: list[str] | None) -> dict[str, list[str]] | None:
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+    """The whole tree, reading and authoring.
+
+    Kept so that ``MCP_TOOLS=routines`` means what it always did. The halves
+    are selectable separately as ``routines_read`` and ``routines_write``: an
+    agent that follows a plan needs the first and has no business with the
+    second, and the sixteen authoring schemas are the single largest block on
+    the wire.
+    """
+    register_read(mcp, api, settings)
+    register_write(mcp, api, settings)
+
+
+def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+    """Reading the plan: the routine tree, and what it prescribes today."""
     _language_id_for = language_id_resolver(api)
     # Exercise names live on translations, not on the exercise itself, and the
     # plan endpoints carry ids only. Resolved here so "what am I doing today"
@@ -504,6 +518,10 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         for kind, value in results:
             out[kind] = value
         return out
+
+
+def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+    """Authoring the plan: creating, changing and deleting its parts."""
 
     @mcp.tool()
     @api_tool

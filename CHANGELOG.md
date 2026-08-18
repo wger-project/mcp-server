@@ -5,6 +5,15 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* The routine tools split into `routines_read` (9 tools) and `routines_write`
+  (16), selectable separately through `MCP_TOOLS`. The authoring half is ~4.2k
+  tokens of schema — nearly a quarter of the whole surface — that an agent
+  following an existing plan never calls. `routines` stays valid and still
+  means both halves, so existing configuration is unaffected; tool names do not
+  change either way.
+* README documents `MCP_TOOLS` profiles with measured token costs, and says
+  what the full surface costs so the trade is visible rather than guessed at.
+
 * `log_set` and `update_workout_log` reach the rest of wger's log fields:
   `reps_unit` (a plank was stored as 60 repetitions, not 60 seconds),
   `rest`, the `*_target` counterparts of reps/weight/rir/rest, `session_id`
