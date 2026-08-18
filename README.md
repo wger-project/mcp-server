@@ -228,15 +228,29 @@ Tools are grouped by domain. Each lives in its own module under [`src/wger_mcp/t
 
 ### Registering only some groups
 
-All 78 tools are registered by default. `MCP_TOOLS` narrows that to a comma-separated list of groups:
+All 85 tools are registered by default, which is about **18.6k tokens** of schema in every request before the conversation starts. `MCP_TOOLS` narrows that to a comma-separated list of groups:
 
 ```bash
-MCP_TOOLS=nutrition,off,profile     # a food-logging agent
+MCP_TOOLS=nutrition,off,exercises,profile
 ```
 
-Valid group names are the module names: `profile`, `routines`, `workout_logs`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off`. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
+Valid names are the module names — `profile`, `routines_read`, `routines_write`, `workout_logs`, `workout_sessions`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off` — plus `routines`, which means both routine halves. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
 
 This matters most for agents driven by small local models, whose tool-selection accuracy falls off as the surface grows, and where every schema is spent from a modest context window. It is also useful for a single-purpose agent that has no business writing routines.
+
+#### Profiles that cover most agents
+
+Measured, not estimated: the token figures are the serialised tool list divided by four.
+
+| Agent | `MCP_TOOLS` | Tools | ~Tokens |
+|------|-------------|------:|--------:|
+| Everything (default) | *(unset)* | 85 | 18.6k |
+| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 11.5k |
+| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 6.5k |
+| Food logging | `nutrition,off,exercises,profile` | 29 | 6.6k |
+| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 20 | 3.0k |
+
+The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.3k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.2k) creates and changes it. An agent that follows a plan needs only the first, which is nearly a quarter of the whole surface saved. `routines` remains valid and still means both.
 
 ### Profile
 
@@ -250,29 +264,39 @@ This matters most for agents driven by small local models, whose tool-selection 
 | Tool | Description |
 |------|-------------|
 | `list_routines` / `get_routine(routine_id)` | List / read training routines |
-| `create_routine(name, description?, start?, end?, fit_in_week?)` | Create a routine |
+| `create_routine(name, description?, start?, end?, fit_in_week?, is_template?, is_public?)` | Create a routine. `is_template` marks it a reusable blueprint; `is_public` additionally offers it to every user of the instance |
 | `update_routine(routine_id, ...)` / `delete_routine(routine_id)` | Patch / delete a routine (cascade) |
 | `list_routine_days(routine_id)` / `get_routine_day(day_id)` | Read day structure |
-| `add_routine_day(routine_id, name, order, description?, is_rest?, day_type?)` | Add a training day |
+| `add_routine_day(routine_id, name, order, description?, is_rest?, day_type?, need_logs_to_advance?)` | Add a training day. `need_logs_to_advance` holds the plan there until sets are logged, instead of advancing by the calendar |
 | `update_routine_day(day_id, ...)` / `delete_routine_day(day_id)` | Patch / delete a day (cascade) |
 | `list_slots(day_id)` / `add_slot_to_day(day_id, order, comment?)` | List / add exercise slots |
-| `update_slot(slot_id, ...)` / `delete_slot(slot_id)` | Patch / delete a slot (cascade) |
+| `update_slot(slot_id, order?, comment?, day_id?)` / `delete_slot(slot_id)` | Patch / delete a slot (cascade). `day_id` moves the slot, entries and configs included, to another day |
 | `list_slot_entries(slot_id)` / `get_slot_entry(entry_id)` | Read exercise entries in a slot |
-| `attach_exercise_to_slot(slot_id, exercise_id, order?, repetition_unit?, weight_unit?, comment?)` | Bind an exercise to a slot |
-| `update_slot_entry(slot_entry_id, ...)` / `delete_slot_entry(slot_entry_id)` | Patch / delete a slot entry |
+| `attach_exercise_to_slot(slot_id, exercise_id, order?, repetition_unit?, weight_unit?, comment?, entry_type?, repetition_rounding?, weight_rounding?)` | Bind an exercise to a slot. `entry_type` is `normal` (default), `warmup`, `dropset`, `myo`, `partial`, `forced`, `tut`, `iso` or `jump`; the rounding fields snap what a progression computes to a loadable step (e.g. `2.5`) |
+| `update_slot_entry(slot_entry_id, ..., slot_id?, entry_type?, repetition_rounding?, weight_rounding?)` / `delete_slot_entry(slot_entry_id)` | Patch / delete a slot entry. `slot_id` moves the entry to another slot |
 | `list_slot_entry_configs(slot_entry_id, kinds?)` | Read per-iteration configs (sets/reps/weight/rir/rest/max_*) |
-| `set_slot_entry_config(slot_entry_id, kind, value, iteration?, operation?, step?, repeat?, weight_unit?)` | Add a per-iteration config record. `weight_unit` applies to `kind='weight'`/`'max_weight'` and is recorded on the slot entry |
-| `update_slot_entry_config(kind, config_id, value?, iteration?, ...)` / `delete_slot_entry_config(kind, config_id)` | Patch / delete a config record (use to bump weight on progression) |
-| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, slot_order?, weight_unit?, rir?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load |
+| `set_slot_entry_config(slot_entry_id, kind, value, iteration?, operation?, step?, repeat?, weight_unit?, requirements?)` | Add a per-iteration config record. `weight_unit` applies to `kind='weight'`/`'max_weight'` and is recorded on the slot entry. `requirements` gates the step on what was logged — any of `repetitions`, `weight`, `rir`, `rest` |
+| `update_slot_entry_config(kind, config_id, value?, iteration?, ..., requirements?)` / `delete_slot_entry_config(kind, config_id)` | Patch / delete a config record (use to bump weight on progression). `requirements=[]` clears an existing gate |
+| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, slot_order?, weight_unit?, rir?, entry_type?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load |
 | `get_workout_for_date(routine_id, workout_date?)` | What the routine prescribes on a date (default today): one entry per planned SET, with exercise name, `slot_entry_id`, reps, weight and RiR. Feed its ids into `log_set` |
 
 ### Workout logs
 
 | Tool | Description |
 |------|-------------|
-| `log_set(exercise_id, reps, weight, workout_log_date?, rir?, weight_unit?, routine_id?, slot_entry_id?, iteration?)` | Add a workout log entry. `weight_unit` is `kg` (default) or `lb`; the weight is stored in the unit given, with no conversion. Pass `routine_id` / `slot_entry_id` / `iteration` (all from `get_workout_for_date`) to attach the set to the plan it came from — without them the log is freestanding and no routine view or routine statistic can see it |
+| `log_set(exercise_id, reps, weight, workout_log_date?, rir?, weight_unit?, routine_id?, slot_entry_id?, iteration?, reps_unit?, rest?, reps_target?, weight_target?, rir_target?, rest_target?, session_id?, next_log_id?)` | Add a workout log entry. `weight_unit` is `kg` (default) or `lb`; the weight is stored in the unit given, with no conversion. Pass `routine_id` / `slot_entry_id` / `iteration` (all from `get_workout_for_date`) to attach the set to the plan it came from — without them the log is freestanding and no routine view or routine statistic can see it. `reps_unit` says what `reps` counts (`repetitions` by default, or `seconds`, `minutes`, `meters`, `kilometers`, `miles`, `until_failure`, `max_reps`) — without it a plank is stored as 60 repetitions. The `*_target` fields put what was prescribed next to what was done, in the same row |
 | `list_workout_logs(date_from?, date_to?, exercise_id?, limit?)` / `get_workout_log(log_id)` | Read entries |
-| `update_workout_log(log_id, reps?, weight?, rir?, when?, weight_unit?)` / `delete_workout_log(log_id)` | Edit / remove an entry |
+| `update_workout_log(log_id, reps?, weight?, rir?, when?, weight_unit?, exercise_id?, reps_unit?, rest?, *_target?, routine_id?, slot_entry_id?, iteration?, session_id?, next_log_id?)` / `delete_workout_log(log_id)` | Edit / remove an entry. `exercise_id` fixes a set logged against the wrong exercise; the plan-linkage arguments attach a set that was logged freestanding |
+
+### Workout sessions
+
+The training unit a day's sets belong to. wger opens one implicitly for a log that names none, so these tools are what make its own fields reachable — when it ran, how it felt, and what the trainee wants to remember about it.
+
+| Tool | Description |
+|------|-------------|
+| `log_workout_session(routine_id?, day_id?, when?, notes?, impression?, time_start?, time_end?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `time_start`/`time_end` are `HH:MM` and must be given together. One session per routine per date |
+| `list_workout_sessions(when?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first. wger filters on an exact date, so `when` takes one day rather than a range |
+| `update_workout_session(session_id, ...)` / `delete_workout_session(session_id)` | Patch / delete a session. Deleting takes its logged sets with it |
 
 ### Body weight
 
@@ -281,6 +305,19 @@ This matters most for agents driven by small local models, whose tool-selection 
 | `log_body_weight(weight_kg, when?)` | Body-weight entry |
 | `get_body_weight_history(limit?)` | Recent weight entries |
 | `update_body_weight_entry(entry_id, ...)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry |
+
+### Body measurements
+
+Anything tracked with a tape measure. Categories are the user's own (Waist, Chest, Bicep, …), each with its unit, and entries hang off them.
+
+| Tool | Description |
+|------|-------------|
+| `list_measurement_categories(limit?)` / `get_measurement_category(category_id)` | Read categories |
+| `create_measurement_category(name, unit?)` | Add a category (e.g. `name='Bicep'`, `unit='cm'`) |
+| `update_measurement_category(category_id, name?, unit?)` / `delete_measurement_category(category_id)` | Rename / re-unit a category, or delete it with all its entries |
+| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00 |
+| `list_measurements(category_id?, date_from?, date_to?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category and date range (both inclusive) |
+| `update_measurement(measurement_id, value?, when?, notes?, category_id?)` / `delete_measurement(measurement_id)` | Edit / remove an entry. `category_id` moves one filed under the wrong category |
 
 ### Exercise catalog
 
@@ -296,7 +333,7 @@ This matters most for agents driven by small local models, whose tool-selection 
 
 | Tool | Description |
 |------|-------------|
-| `search_ingredients(query, language, limit, nutriscore?, nutriscore_better_than?, nutriscore_at_worst?)` | Find foods by name. Optional Nutri-Score filters (wger 2.6): exact grade, or `nutriscore_better_than='C'` (A/B only), or `nutriscore_at_worst='C'` (C or better) |
+| `search_ingredients(query, language, limit, nutriscore?, nutriscore_better_than?, nutriscore_at_worst?)` | Find foods by name; returns macros, `fiber` and the `nutriscore` grade. Optional Nutri-Score filters (wger 2.6): exact grade, or `nutriscore_better_than='C'` (A/B only), or `nutriscore_at_worst='C'` (C or better) |
 | `search_ingredient_by_barcode(barcode, limit?)` | Exact lookup by EAN/UPC (`?code=`) — preferred over name search |
 | `get_ingredient(ingredient_id)` | Full ingredient detail (macros per 100 g) |
 
@@ -307,14 +344,15 @@ This matters most for agents driven by small local models, whose tool-selection 
 | Tool | Description |
 |------|-------------|
 | `list_nutrition_plans` / `get_nutrition_plan(plan_id)` | Read nutrition plans |
-| `create_nutrition_plan(description?, only_logging?, goal_energy?, goal_protein?, goal_carbohydrates?, goal_fat?)` | Create a plan (returns `plan_id`) |
+| `create_nutrition_plan(description?, only_logging?, goal_energy?, goal_protein?, goal_carbohydrates?, goal_fat?, goal_fiber?, start?, end?)` | Create a plan (returns `plan_id`). `start`/`end` date the block; `goal_fiber` sits alongside the macro goals |
 | `update_nutrition_plan(plan_id, ...)` / `delete_nutrition_plan(plan_id)` | Patch / delete a plan (cascade) |
 | `create_meal(plan_id, name, order?, time?)` | Add a meal to a plan |
 | `create_recipe(plan_id, name, order?)` / `get_recipe(recipe_id)` / `add_ingredient_to_recipe(recipe_id, ingredient_id, amount_g, order?, weight_unit_id?)` | Recipes (semantic aliases over `meal/` + `mealitem/` — wger has no separate Recipe entity) |
-| `log_ingredient(plan_id, ingredient_id, amount_g, when?, meal_id?)` | Nutrition diary entry. `when` takes a full timestamp (`2026-07-21T07:30:00+02:00`, offset preserved) or a bare date (anchored at 12:00); omit it to let wger use the current time |
-| `update_log_item(log_item_id, amount_g?, when?, ingredient_id?, meal_id?)` | Patch a diary entry — the way to correct an entry's time or amount in place |
+| `log_ingredient(plan_id, ingredient_id, amount_g, when?, meal_id?, weight_unit_id?)` | Nutrition diary entry. `when` takes a full timestamp (`2026-07-21T07:30:00+02:00`, offset preserved) or a bare date (anchored at 12:00); omit it to let wger use the current time. With `weight_unit_id` the amount counts portions instead of grams — two slices, not two grams; the id is checked against the ingredient first |
+| `list_ingredient_units(ingredient_id, limit?)` | The portions wger knows for one ingredient (slice, cup, can) with the grams each weighs — the only way to discover the ids `weight_unit_id` takes |
+| `update_log_item(log_item_id, amount_g?, when?, ingredient_id?, meal_id?, weight_unit_id?, plan_id?)` | Patch a diary entry — the way to correct an entry's time or amount in place. `plan_id` moves it to another plan |
 | `list_log_items(when?, plan_id?, limit?)` / `delete_log_item(log_item_id)` | List / remove diary entries |
-| `nutrition_summary(when?, plan_id?)` | Daily kcal/protein/carbs/fat from diary entries |
+| `nutrition_summary(when?, plan_id?)` | Daily kcal/protein/carbs/fat/fiber from diary entries. Entries logged in a portion unit are scaled by what that unit weighs, as wger does |
 | `calculate_daily_calories(weight_kg?, height_cm?, age?, sex?, activity_level?, goal?, protein_g_per_kg?, fat_pct_of_kcal?, apply_to_profile?)` | Mifflin-St Jeor TDEE + macro split. All physical inputs auto-fill from `userprofile/` + latest `weightentry/`. `apply_to_profile=True` PATCHes the result into `userprofile.calories` |
 
 ### Analytics

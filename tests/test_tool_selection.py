@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings, load_settings
-from wger_mcp.tools import TOOL_GROUPS, off, register_all
+from wger_mcp.tools import GROUP_ALIASES, SELECTABLE, TOOL_GROUPS, off, register_all
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -112,3 +112,40 @@ def test_every_group_name_is_a_valid_selection() -> None:
         settings = _settings(mcp_tools=[group])
         mcp = FastMCP("test")
         _register(mcp, settings)
+
+
+# ---------- the routines split ----------
+
+
+async def test_routines_alias_still_means_the_whole_tree() -> None:
+    """The group was split so an agent that follows a plan need not carry the
+    authoring schemas. Configs that predate the split must not notice."""
+    both = await _tool_names(mcp_tools=["routines_read", "routines_write"])
+    assert await _tool_names(mcp_tools=["routines"]) == both
+
+
+async def test_reading_a_plan_costs_none_of_the_authoring_tools() -> None:
+    read = await _tool_names(mcp_tools=["routines_read"])
+    assert "get_workout_for_date" in read  # what a plan-following agent needs
+    assert "list_slot_entry_configs" in read
+    assert not {n for n in read if n.startswith(("create_", "add_", "update_", "delete_"))}
+
+
+async def test_authoring_half_carries_the_writes() -> None:
+    write = await _tool_names(mcp_tools=["routines_write"])
+    assert {"create_routine", "add_exercise_with_sets", "set_slot_entry_config"} <= write
+    assert "get_workout_for_date" not in write
+
+
+async def test_the_two_halves_do_not_overlap() -> None:
+    read = await _tool_names(mcp_tools=["routines_read"])
+    write = await _tool_names(mcp_tools=["routines_write"])
+    assert not read & write
+
+
+async def test_alias_is_offered_when_a_name_is_wrong() -> None:
+    """The error names what may be written, so an alias is not a trap."""
+    assert "routines" in SELECTABLE
+    assert set(GROUP_ALIASES) <= set(SELECTABLE)
+    with pytest.raises(ValueError, match="routines"):
+        _register(FastMCP("test"), _settings(mcp_tools=["routine"]))

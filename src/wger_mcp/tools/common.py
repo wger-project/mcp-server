@@ -29,6 +29,28 @@ _BARE_DATE_TIME = time(12, 0)
 WEIGHT_UNITS: dict[str, int] = {"kg": 1, "lb": 2}
 _WEIGHT_UNIT_NAMES: dict[int, str] = {v: k for k, v in WEIGHT_UNITS.items()}
 
+# wger's repetition-unit ids (/api/v2/setting-repetitionunit/), keyed by the
+# fixture name lowercased. A log or a planned set that leaves this alone counts
+# repetitions; the other units are what make a plank, a row or a run something
+# other than "60 reps".
+REPETITION_UNITS: dict[str, int] = {
+    "repetitions": 1,
+    "until_failure": 2,
+    "seconds": 3,
+    "minutes": 4,
+    "miles": 5,
+    "kilometers": 6,
+    "max_reps": 7,
+    "meters": 8,
+}
+
+
+# wger accepts RiR only in half steps up to 4.5 (manager/consts.py
+# RIR_OPTIONS), enforced by a model validator that DRF carries onto the
+# serializer field. A looser bound here only spends a round trip on a 400.
+RIR_MAX = 4.5
+RIR_STEP = 0.5
+
 
 class ToolInputError(Exception):
     """An argument wger cannot accept. Reported to the caller as a 400."""
@@ -85,6 +107,18 @@ def as_weight_unit(unit: str | None) -> int | None:
     except KeyError:
         raise ToolInputError(
             f"unknown weight_unit '{unit}'; expected one of {', '.join(WEIGHT_UNITS)}"
+        ) from None
+
+
+def as_repetition_unit(unit: str | None) -> int | None:
+    """Look up wger's id for a repetition unit. ``None`` stays ``None``."""
+    if unit is None:
+        return None
+    try:
+        return REPETITION_UNITS[unit]
+    except KeyError:
+        raise ToolInputError(
+            f"unknown repetition unit '{unit}'; expected one of {', '.join(REPETITION_UNITS)}"
         ) from None
 
 
