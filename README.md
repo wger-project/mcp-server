@@ -292,6 +292,19 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 | `get_body_weight_history(limit?)` | Recent weight entries |
 | `update_body_weight_entry(entry_id, ...)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry |
 
+### Body measurements
+
+Anything tracked with a tape measure. Categories are the user's own (Waist, Chest, Bicep, …), each with its unit, and entries hang off them.
+
+| Tool | Description |
+|------|-------------|
+| `list_measurement_categories(limit?)` / `get_measurement_category(category_id)` | Read categories |
+| `create_measurement_category(name, unit?)` | Add a category (e.g. `name='Bicep'`, `unit='cm'`) |
+| `update_measurement_category(category_id, name?, unit?)` / `delete_measurement_category(category_id)` | Rename / re-unit a category, or delete it with all its entries |
+| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00 |
+| `list_measurements(category_id?, date_from?, date_to?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category and date range (both inclusive) |
+| `update_measurement(measurement_id, value?, when?, notes?, category_id?)` / `delete_measurement(measurement_id)` | Edit / remove an entry. `category_id` moves one filed under the wrong category |
+
 ### Exercise catalog
 
 | Tool | Description |
