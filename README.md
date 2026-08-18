@@ -234,7 +234,7 @@ All 78 tools are registered by default. `MCP_TOOLS` narrows that to a comma-sepa
 MCP_TOOLS=nutrition,off,profile     # a food-logging agent
 ```
 
-Valid group names are the module names: `profile`, `routines`, `workout_logs`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off`. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
+Valid group names are the module names: `profile`, `routines`, `workout_logs`, `workout_sessions`, `body_weight`, `measurements`, `equipment`, `nutrition`, `exercises`, `analytics`, `off`. An unknown name stops the server at startup rather than silently dropping tools, and repeated names are harmless.
 
 This matters most for agents driven by small local models, whose tool-selection accuracy falls off as the surface grows, and where every schema is spent from a modest context window. It is also useful for a single-purpose agent that has no business writing routines.
 
@@ -250,29 +250,39 @@ This matters most for agents driven by small local models, whose tool-selection 
 | Tool | Description |
 |------|-------------|
 | `list_routines` / `get_routine(routine_id)` | List / read training routines |
-| `create_routine(name, description?, start?, end?, fit_in_week?)` | Create a routine |
+| `create_routine(name, description?, start?, end?, fit_in_week?, is_template?, is_public?)` | Create a routine. `is_template` marks it a reusable blueprint; `is_public` additionally offers it to every user of the instance |
 | `update_routine(routine_id, ...)` / `delete_routine(routine_id)` | Patch / delete a routine (cascade) |
 | `list_routine_days(routine_id)` / `get_routine_day(day_id)` | Read day structure |
-| `add_routine_day(routine_id, name, order, description?, is_rest?, day_type?)` | Add a training day |
+| `add_routine_day(routine_id, name, order, description?, is_rest?, day_type?, need_logs_to_advance?)` | Add a training day. `need_logs_to_advance` holds the plan there until sets are logged, instead of advancing by the calendar |
 | `update_routine_day(day_id, ...)` / `delete_routine_day(day_id)` | Patch / delete a day (cascade) |
 | `list_slots(day_id)` / `add_slot_to_day(day_id, order, comment?)` | List / add exercise slots |
-| `update_slot(slot_id, ...)` / `delete_slot(slot_id)` | Patch / delete a slot (cascade) |
+| `update_slot(slot_id, order?, comment?, day_id?)` / `delete_slot(slot_id)` | Patch / delete a slot (cascade). `day_id` moves the slot, entries and configs included, to another day |
 | `list_slot_entries(slot_id)` / `get_slot_entry(entry_id)` | Read exercise entries in a slot |
-| `attach_exercise_to_slot(slot_id, exercise_id, order?, repetition_unit?, weight_unit?, comment?)` | Bind an exercise to a slot |
-| `update_slot_entry(slot_entry_id, ...)` / `delete_slot_entry(slot_entry_id)` | Patch / delete a slot entry |
+| `attach_exercise_to_slot(slot_id, exercise_id, order?, repetition_unit?, weight_unit?, comment?, entry_type?, repetition_rounding?, weight_rounding?)` | Bind an exercise to a slot. `entry_type` is `normal` (default), `warmup`, `dropset`, `myo`, `partial`, `forced`, `tut`, `iso` or `jump`; the rounding fields snap what a progression computes to a loadable step (e.g. `2.5`) |
+| `update_slot_entry(slot_entry_id, ..., slot_id?, entry_type?, repetition_rounding?, weight_rounding?)` / `delete_slot_entry(slot_entry_id)` | Patch / delete a slot entry. `slot_id` moves the entry to another slot |
 | `list_slot_entry_configs(slot_entry_id, kinds?)` | Read per-iteration configs (sets/reps/weight/rir/rest/max_*) |
-| `set_slot_entry_config(slot_entry_id, kind, value, iteration?, operation?, step?, repeat?, weight_unit?)` | Add a per-iteration config record. `weight_unit` applies to `kind='weight'`/`'max_weight'` and is recorded on the slot entry |
-| `update_slot_entry_config(kind, config_id, value?, iteration?, ...)` / `delete_slot_entry_config(kind, config_id)` | Patch / delete a config record (use to bump weight on progression) |
-| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, slot_order?, weight_unit?, rir?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load |
+| `set_slot_entry_config(slot_entry_id, kind, value, iteration?, operation?, step?, repeat?, weight_unit?, requirements?)` | Add a per-iteration config record. `weight_unit` applies to `kind='weight'`/`'max_weight'` and is recorded on the slot entry. `requirements` gates the step on what was logged — any of `repetitions`, `weight`, `rir`, `rest` |
+| `update_slot_entry_config(kind, config_id, value?, iteration?, ..., requirements?)` / `delete_slot_entry_config(kind, config_id)` | Patch / delete a config record (use to bump weight on progression). `requirements=[]` clears an existing gate |
+| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, slot_order?, weight_unit?, rir?, entry_type?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load |
 | `get_workout_for_date(routine_id, workout_date?)` | What the routine prescribes on a date (default today): one entry per planned SET, with exercise name, `slot_entry_id`, reps, weight and RiR. Feed its ids into `log_set` |
 
 ### Workout logs
 
 | Tool | Description |
 |------|-------------|
-| `log_set(exercise_id, reps, weight, workout_log_date?, rir?, weight_unit?, routine_id?, slot_entry_id?, iteration?)` | Add a workout log entry. `weight_unit` is `kg` (default) or `lb`; the weight is stored in the unit given, with no conversion. Pass `routine_id` / `slot_entry_id` / `iteration` (all from `get_workout_for_date`) to attach the set to the plan it came from — without them the log is freestanding and no routine view or routine statistic can see it |
+| `log_set(exercise_id, reps, weight, workout_log_date?, rir?, weight_unit?, routine_id?, slot_entry_id?, iteration?, reps_unit?, rest?, reps_target?, weight_target?, rir_target?, rest_target?, session_id?, next_log_id?)` | Add a workout log entry. `weight_unit` is `kg` (default) or `lb`; the weight is stored in the unit given, with no conversion. Pass `routine_id` / `slot_entry_id` / `iteration` (all from `get_workout_for_date`) to attach the set to the plan it came from — without them the log is freestanding and no routine view or routine statistic can see it. `reps_unit` says what `reps` counts (`repetitions` by default, or `seconds`, `minutes`, `meters`, `kilometers`, `miles`, `until_failure`, `max_reps`) — without it a plank is stored as 60 repetitions. The `*_target` fields put what was prescribed next to what was done, in the same row |
 | `list_workout_logs(date_from?, date_to?, exercise_id?, limit?)` / `get_workout_log(log_id)` | Read entries |
-| `update_workout_log(log_id, reps?, weight?, rir?, when?, weight_unit?)` / `delete_workout_log(log_id)` | Edit / remove an entry |
+| `update_workout_log(log_id, reps?, weight?, rir?, when?, weight_unit?, exercise_id?, reps_unit?, rest?, *_target?, routine_id?, slot_entry_id?, iteration?, session_id?, next_log_id?)` / `delete_workout_log(log_id)` | Edit / remove an entry. `exercise_id` fixes a set logged against the wrong exercise; the plan-linkage arguments attach a set that was logged freestanding |
+
+### Workout sessions
+
+The training unit a day's sets belong to. wger opens one implicitly for a log that names none, so these tools are what make its own fields reachable — when it ran, how it felt, and what the trainee wants to remember about it.
+
+| Tool | Description |
+|------|-------------|
+| `log_workout_session(routine_id?, day_id?, when?, notes?, impression?, time_start?, time_end?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `time_start`/`time_end` are `HH:MM` and must be given together. One session per routine per date |
+| `list_workout_sessions(when?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first. wger filters on an exact date, so `when` takes one day rather than a range |
+| `update_workout_session(session_id, ...)` / `delete_workout_session(session_id)` | Patch / delete a session. Deleting takes its logged sets with it |
 
 ### Body weight
 

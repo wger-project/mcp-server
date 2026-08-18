@@ -27,6 +27,7 @@ from . import (
     profile,
     routines,
     workout_logs,
+    workout_sessions,
 )
 
 # The client argument is Any because off takes the Open Food Facts httpx
@@ -39,6 +40,7 @@ _REGISTRARS: dict[str, Registrar] = {
     "profile": profile.register,
     "routines": routines.register,
     "workout_logs": workout_logs.register,
+    "workout_sessions": workout_sessions.register,
     "body_weight": body_weight.register,
     "measurements": measurements.register,
     "equipment": equipment.register,

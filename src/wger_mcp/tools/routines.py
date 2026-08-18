@@ -104,6 +104,7 @@ from wger_api_client.api.weight_config import (
 from wger_api_client.client import AuthenticatedClient
 from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.models.day_type_enum import DAY_TYPE_ENUM_VALUES
+from wger_api_client.models.exercise_type_enum import EXERCISE_TYPE_ENUM_VALUES
 from wger_api_client.models.operation_enum import OPERATION_ENUM_VALUES
 from wger_api_client.models.step_enum import STEP_ENUM_VALUES
 from wger_api_client.types import UNSET, Unset
@@ -111,6 +112,8 @@ from wger_api_client.types import UNSET, Unset
 from ..api_client import paginate
 from ..config import Settings
 from .common import (
+    RIR_MAX,
+    RIR_STEP,
     ToolInputError,
     api_err,
     api_list_tool,
@@ -232,8 +235,14 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
 }
 
 DAY_TYPES = tuple(sorted(DAY_TYPE_ENUM_VALUES))
+EXERCISE_TYPES = tuple(sorted(EXERCISE_TYPE_ENUM_VALUES))
 OPERATIONS = tuple(sorted(OPERATION_ENUM_VALUES))
 STEPS = tuple(sorted(STEP_ENUM_VALUES))
+
+# Log fields a progression may be made conditional on. wger keeps the list in
+# manager/consts.py as REQUIREMENTS_RULES_KEYS and validates against it; the
+# generated client types the field as a bare JSON blob, so the check is here.
+REQUIREMENT_RULES = ("repetitions", "rest", "rir", "weight")
 
 # wger requires an end date on every routine; twelve weeks is a conventional
 # training block.
@@ -247,6 +256,8 @@ DAY_NAME_MAX = 20
 def _config_value(cfg: _ConfigApi, kind: str, value: float) -> int | str:
     """The wire value for a config kind: whole numbers for sets and rest
     seconds, decimal strings for the rest."""
+    if kind in ("rir", "max_rir") and (value < 0 or value > RIR_MAX or value % RIR_STEP):
+        raise ToolInputError(f"{kind} must be a half step between 0 and {RIR_MAX}, got {value}")
     if not cfg.int_value:
         return as_decimal(value)
     if value != int(value):
@@ -256,6 +267,24 @@ def _config_value(cfg: _ConfigApi, kind: str, value: float) -> int | str:
 
 def _unknown_kind(kind: str) -> dict[str, Any]:
     return bad_request(f"unknown kind '{kind}'; expected one of {sorted(CONFIG_KINDS)}")
+
+
+def _requirements(rules: list[str] | None) -> dict[str, list[str]] | None:
+    """wger's requirements blob for the given rule names.
+
+    An empty list is not the same as ``None``: it sends ``{"rules": []}``,
+    which clears the gate on a config that already had one, while ``None``
+    leaves the field out of the request entirely.
+    """
+    if rules is None:
+        return None
+    unknown = sorted(set(rules) - set(REQUIREMENT_RULES))
+    if unknown:
+        raise ToolInputError(
+            f"unknown requirement rule(s) {', '.join(unknown)}; "
+            f"expected any of {', '.join(REQUIREMENT_RULES)}"
+        )
+    return {"rules": list(dict.fromkeys(rules))}
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
@@ -484,11 +513,18 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         start: date | None = None,
         end: date | None = None,
         fit_in_week: bool = False,
+        is_template: bool = False,
+        is_public: bool = False,
     ) -> dict[str, Any]:
         """Create a training routine.
 
         Start defaults to today. wger requires an end date, so one is derived
         from the start when not given (12 weeks).
+
+        is_template marks the routine as a reusable blueprint rather than a
+        block someone is currently training. is_public additionally offers that
+        template to every user of this wger instance, so only set it when the
+        trainee asked to share their plan; it has no effect on its own.
         """
         start_date = start or date.today()
         end_date = end or start_date + timedelta(weeks=DEFAULT_ROUTINE_WEEKS)
@@ -500,6 +536,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             name=name,
             description=description,
             fit_in_week=fit_in_week,
+            is_template=is_template,
+            is_public=is_public,
         )
         created = await routine_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -513,14 +551,22 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         start: date | None = None,
         end: date | None = None,
         fit_in_week: bool | None = None,
+        is_template: bool | None = None,
+        is_public: bool | None = None,
     ) -> dict[str, Any]:
-        """Patch a routine. Only provided fields are sent."""
+        """Patch a routine. Only provided fields are sent.
+
+        See create_routine for is_template / is_public; is_public shares the
+        template with every user of this wger instance.
+        """
         body = api_models.PatchedRoutineRequest(
             name=opt(name),
             description=opt(description),
             start=opt(start),
             end=opt(end),
             fit_in_week=opt(fit_in_week),
+            is_template=opt(is_template),
+            is_public=opt(is_public),
         )
         require_fields(body)
         updated = await routine_partial_update.asyncio(
@@ -537,11 +583,16 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         description: str = "",
         is_rest: bool = False,
         day_type: str = "custom",
+        need_logs_to_advance: bool = False,
     ) -> dict[str, Any]:
         """Add a training day to a routine.
 
         day_type is one of: custom, enom, amrap, hiit, tabata, edt, rft, afap.
         Leave it alone for ordinary strength training.
+
+        need_logs_to_advance holds the plan on this day until sets are actually
+        logged for it. Without it a routine advances by the calendar, so a
+        missed session silently costs the trainee that day's work.
         """
         if day_type not in DAY_TYPE_ENUM_VALUES:
             return bad_request(
@@ -554,6 +605,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             description=description,
             is_rest=is_rest,
             type_=day_type,
+            need_logs_to_advance=need_logs_to_advance,
         )
         created = await day_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -580,8 +632,12 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         description: str | None = None,
         is_rest: bool | None = None,
         day_type: str | None = None,
+        need_logs_to_advance: bool | None = None,
     ) -> dict[str, Any]:
-        """Patch a training day. Only provided fields are sent."""
+        """Patch a training day. Only provided fields are sent.
+
+        See add_routine_day for need_logs_to_advance.
+        """
         if day_type is not None and day_type not in DAY_TYPE_ENUM_VALUES:
             return bad_request(
                 f"unknown day type '{day_type}'; expected one of {', '.join(DAY_TYPES)}"
@@ -592,6 +648,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             description=opt(description),
             is_rest=opt(is_rest),
             type_=opt(day_type),
+            need_logs_to_advance=opt(need_logs_to_advance),
         )
         require_fields(body)
         updated = await day_partial_update.asyncio(
@@ -605,11 +662,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         slot_id: str,
         order: Annotated[int | None, Field(ge=1, le=100)] = None,
         comment: str | None = None,
+        day_id: str | None = None,
     ) -> dict[str, Any]:
-        """Patch a slot."""
+        """Patch a slot. day_id moves the slot, with its entries and configs,
+        to another day of the routine — otherwise the only way to shift an
+        exercise between days is to rebuild it there and delete the original."""
         body = api_models.PatchedSlotRequest(
             order=opt(order),
             comment=opt(comment),
+            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
         )
         require_fields(body)
         updated = await slot_partial_update.asyncio(
@@ -626,14 +687,34 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         comment: str | None = None,
         repetition_unit: int | None = None,
         weight_unit: int | None = None,
+        slot_id: str | None = None,
+        entry_type: str | None = None,
+        repetition_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
+        weight_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
     ) -> dict[str, Any]:
-        """Patch a slot entry (the exercise binding)."""
+        """Patch a slot entry (the exercise binding).
+
+        See attach_exercise_to_slot for entry_type and the rounding fields.
+        slot_id moves the entry to another slot.
+        """
+        if entry_type is not None and entry_type not in EXERCISE_TYPE_ENUM_VALUES:
+            return bad_request(
+                f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
+            )
         body = api_models.PatchedSlotEntryRequest(
             exercise=(as_int(exercise_id, "exercise_id") if exercise_id is not None else UNSET),
             order=opt(order),
             comment=opt(comment),
             repetition_unit=opt(repetition_unit),
             weight_unit=opt(weight_unit),
+            slot=opt(as_int(slot_id, "slot_id") if slot_id is not None else None),
+            type_=opt(entry_type),
+            repetition_rounding=opt(
+                as_decimal(repetition_rounding) if repetition_rounding is not None else None
+            ),
+            weight_rounding=opt(
+                as_decimal(weight_rounding) if weight_rounding is not None else None
+            ),
         )
         require_fields(body)
         updated = await slot_entry_partial_update.asyncio(
@@ -651,10 +732,16 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         operation: str | None = None,
         step: str | None = None,
         repeat: bool | None = None,
+        requirements: list[str] | None = None,
     ) -> dict[str, Any]:
         """Patch an existing per-iteration config record.
         kind selects the endpoint (sets, reps, weight, rir, rest, max_*).
-        Use this to bump weight when progressing."""
+        Use this to bump weight when progressing.
+
+        requirements gates the progression on the logs (see
+        set_slot_entry_config). Pass an empty list to drop an existing gate and
+        let the step apply unconditionally again.
+        """
         cfg = CONFIG_KINDS.get(kind)
         if cfg is None:
             return _unknown_kind(kind)
@@ -668,6 +755,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             operation=opt(operation),
             step=opt(step),
             repeat=opt(repeat),
+            requirements=opt(_requirements(requirements)),
         )
         require_fields(body)
         updated = await cfg.update_mod.asyncio(
@@ -724,10 +812,28 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         repetition_unit: int | None = None,
         weight_unit: int | None = None,
         comment: str = "",
+        entry_type: str = "normal",
+        repetition_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
+        weight_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
     ) -> dict[str, Any]:
         """Attach an exercise to a slot. exercise_id is the numeric wger PK
         (same id used in log_set / exerciseinfo). Per-set reps/weight live on
-        sets-config / repetitions-config / weight-config records, not here."""
+        sets-config / repetitions-config / weight-config records, not here.
+
+        entry_type says what kind of set this is: normal, warmup, dropset, myo,
+        partial, forced, tut (time under tension), iso (isometric hold) or jump.
+        Warmup sets in particular need it — left at 'normal' they count as
+        working sets in every later reading of the plan.
+
+        repetition_rounding / weight_rounding round what a progression computes
+        to something loadable: 2.5 for a gym whose smallest pair of plates makes
+        2.5 kg, 1 for whole repetitions. Without them a percentage step
+        prescribes weights no bar can hold.
+        """
+        if entry_type not in EXERCISE_TYPE_ENUM_VALUES:
+            return bad_request(
+                f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
+            )
         body = api_models.SlotEntryRequest(
             slot=as_int(slot_id, "slot_id"),
             exercise=as_int(exercise_id, "exercise_id"),
@@ -735,6 +841,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             comment=comment,
             repetition_unit=opt(repetition_unit),
             weight_unit=opt(weight_unit),
+            type_=entry_type,
+            repetition_rounding=opt(
+                as_decimal(repetition_rounding) if repetition_rounding is not None else None
+            ),
+            weight_rounding=opt(
+                as_decimal(weight_rounding) if weight_rounding is not None else None
+            ),
         )
         created = await slot_entry_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -750,6 +863,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         step: str = "abs",
         repeat: bool = False,
         weight_unit: str | None = None,
+        requirements: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a per-iteration config record for a slot entry.
         kind: one of sets, reps, weight, rir, rest, max_sets, max_reps,
@@ -760,6 +874,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         number means. wger stores the unit on the slot ENTRY rather than on the
         weight config, so this patches the entry for you. Otherwise a weight set
         here is silently read in whatever unit the entry already had.
+
+        requirements makes the step conditional on what was actually logged, as
+        a list of any of: repetitions, weight, rir, rest. requirements=['reps']
+        is not a rule name — use 'repetitions'. With ['repetitions'] the weight
+        only goes up once the prescribed reps were hit; left empty the
+        progression fires every iteration whether or not the trainee earned it,
+        which is how a plan drifts ahead of the person following it.
         """
         cfg = CONFIG_KINDS.get(kind)
         if cfg is None:
@@ -791,6 +912,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             operation=operation,
             step=step,
             repeat=repeat,
+            requirements=opt(_requirements(requirements)),
         )
         created = await cfg.create_mod.asyncio(client=api, body=body)
         return created.to_dict()
@@ -805,7 +927,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         weight: Annotated[float | None, Field(ge=0, le=2000)] = None,
         slot_order: Annotated[int, Field(ge=1, le=100)] = 1,
         weight_unit: str = "kg",
-        rir: Annotated[float | None, Field(ge=0, le=10)] = None,
+        rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
+        entry_type: str = "normal",
     ) -> dict[str, Any]:
         """High-level convenience: create slot + slot-entry + sets/reps configs
         in one call. Returns the created ids. Partial failures are reported in
@@ -818,7 +941,14 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
 
         rir sets a Reps-In-Reserve target for the set, wger's autoregulation
         field: 2 means "stop with two good reps left".
+
+        entry_type marks what kind of set this is (normal, warmup, dropset, …);
+        see attach_exercise_to_slot.
         """
+        if entry_type not in EXERCISE_TYPE_ENUM_VALUES:
+            return bad_request(
+                f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
+            )
         # Parsed up front: the slot must not be created if a later id is bad
         day = as_int(day_id, "day_id")
         exercise = as_int(exercise_id, "exercise_id")
@@ -843,7 +973,12 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             entry = await slot_entry_create.asyncio(
                 client=api,
                 body=api_models.SlotEntryRequest(
-                    slot=slot.id, exercise=exercise, order=1, comment="", weight_unit=unit
+                    slot=slot.id,
+                    exercise=exercise,
+                    order=1,
+                    comment="",
+                    weight_unit=unit,
+                    type_=entry_type,
                 ),
             )
         except (UnexpectedStatus, httpx.HTTPError) as exc:
