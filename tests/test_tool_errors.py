@@ -157,3 +157,64 @@ async def test_nutriscore_filters_are_sent_lowercase(
     monkeypatch.setattr(exercises.ingredientinfo_list, "asyncio", capture)
     await mcp.call_tool("search_ingredients", {"query": "milk", "nutriscore_at_worst": "C"})
     assert sent["nutriscore_lte"] == "c"
+
+
+# ---------- add_exercise_with_sets rollback ----------
+
+
+@pytest.mark.asyncio
+async def test_failed_exercise_attach_deletes_the_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An entry failure must not leave a slot that renders in no plan view."""
+    deleted: list[int] = []
+
+    async def _destroy(*, id: int, client: Any) -> Any:
+        deleted.append(id)
+        return None
+
+    async def _slot(**kwargs: Any) -> Any:
+        return api_models.Slot(id=42, day=8, order=1)
+
+    monkeypatch.setattr(routines.slot_create, "asyncio", _slot)
+    monkeypatch.setattr(
+        routines.slot_entry_create, "asyncio", _raiser(UnexpectedStatus(400, b"no such exercise"))
+    )
+    monkeypatch.setattr(routines.slot_destroy, "asyncio_detailed", _destroy)
+
+    mcp = _register(routines)
+    out = _result(
+        await mcp.call_tool(
+            "add_exercise_with_sets",
+            {"day_id": "8", "exercise_id": "999999", "sets": 3, "reps": 8},
+        )
+    )
+    assert deleted == [42]
+    assert out["error"] is True
+    assert out["stage"] == "slot-entry"
+    assert out["slot_rolled_back"] is True
+    assert "slot" not in out
+
+
+@pytest.mark.asyncio
+async def test_rollback_failure_still_reports_the_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the cleanup delete also fails, the slot id stays in the response."""
+
+    async def _slot(**kwargs: Any) -> Any:
+        return api_models.Slot(id=42, day=8, order=1)
+
+    monkeypatch.setattr(routines.slot_create, "asyncio", _slot)
+    monkeypatch.setattr(
+        routines.slot_entry_create, "asyncio", _raiser(UnexpectedStatus(400, b"nope"))
+    )
+    monkeypatch.setattr(
+        routines.slot_destroy, "asyncio_detailed", _raiser(httpx.ConnectError("down"))
+    )
+
+    mcp = _register(routines)
+    out = _result(
+        await mcp.call_tool(
+            "add_exercise_with_sets",
+            {"day_id": "8", "exercise_id": "999999", "sets": 3, "reps": 8},
+        )
+    )
+    assert out["slot_rolled_back"] is False
+    assert out["slot"]["id"] == 42
