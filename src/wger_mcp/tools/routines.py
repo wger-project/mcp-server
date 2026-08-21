@@ -795,6 +795,14 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         created = await cfg.create_mod.asyncio(client=api, body=body)
         return created.to_dict()
 
+    async def _discard_slot(slot_id: int) -> bool:
+        """Best-effort delete of a slot this module has just created."""
+        try:
+            await slot_destroy.asyncio_detailed(id=slot_id, client=api)
+        except (UnexpectedStatus, httpx.HTTPError):
+            return False
+        return True
+
     @mcp.tool()
     @api_tool
     async def add_exercise_with_sets(
@@ -809,7 +817,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     ) -> dict[str, Any]:
         """High-level convenience: create slot + slot-entry + sets/reps configs
         in one call. Returns the created ids. Partial failures are reported in
-        the response.
+        the response; if the exercise cannot be attached, the empty slot is
+        deleted again, because nothing renders it and it cannot be found later.
 
         weight is optional: omit it to prescribe an exercise without a load,
         which is the honest thing to do before the trainee's working weights are
@@ -847,7 +856,12 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 ),
             )
         except (UnexpectedStatus, httpx.HTTPError) as exc:
-            return result | api_err(exc) | {"stage": "slot-entry"}
+            # A slot holding no entry renders nowhere in the plan, so a caller
+            # cannot see it to clean it up. Undo it rather than leave it behind.
+            rolled_back = await _discard_slot(slot.id)
+            if rolled_back:
+                result.pop("slot")
+            return result | api_err(exc) | {"stage": "slot-entry", "slot_rolled_back": rolled_back}
         result["slot_entry"] = entry.to_dict()
 
         # The configs only depend on the entry, so they go out together
