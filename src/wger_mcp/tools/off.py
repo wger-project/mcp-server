@@ -2,11 +2,10 @@
 
 OFF is a free, community-maintained food database (~3.6 M products) covering
 many countries and languages. Use these tools when you have an EAN/UPC barcode
-and want macros — much more precise than name search. Output includes a
-`wger_ingredient_payload` field: a normalised per-100 g macro structure (kept
-for convenience / downstream use). Note that submitting custom ingredients to
-wger from the MCP is not supported — wger's REST `/ingredient/` is read-only,
-and the old web-form path was dropped with the move to multi-user auth.
+and want macros — much more precise than name search. Note that submitting
+custom ingredients to wger from the MCP is not supported — wger's REST
+`/ingredient/` is read-only, and the old web-form path was dropped with the
+move to multi-user auth.
 
 Localisation: OFF stores per-language fields (``product_name_<lang>``,
 ``ingredients_text_<lang>``). Which one is requested and preferred comes from
@@ -16,6 +15,7 @@ Localisation: OFF stores per-language fields (``product_name_<lang>``,
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 import httpx
@@ -54,6 +54,15 @@ def _fields_for(lang: str) -> str:
     """
     localised = [tpl.format(lang=lang) for tpl in _LOCALISED_FIELDS]
     return ",".join([*_BASE_FIELDS, *localised])
+
+
+def _err(status: int, detail: Any) -> dict[str, Any]:
+    """Shape an OFF failure as a tool-response dict.
+
+    Deliberately not ``common.api_err``: that one speaks for the wger API and
+    would report an unreachable Open Food Facts as "wger is unreachable".
+    """
+    return {"error": True, "status": status, "detail": detail}
 
 
 def _f(nut: dict[str, Any], *keys: str) -> float | None:
@@ -122,30 +131,6 @@ def _shape(prod: dict[str, Any], lang: str) -> dict[str, Any]:
         "sodium_g": sodium,
     }
 
-    # A payload that maps onto create_ingredient's keyword arguments. The
-    # caller can splat this dict directly into create_ingredient(**payload).
-    wger_payload: dict[str, Any] = {
-        "name": name,
-        "brand": brand or "",
-        "code": prod.get("code"),
-    }
-    if energy is not None:
-        wger_payload["energy_kcal"] = energy
-    if protein is not None:
-        wger_payload["protein_g"] = protein
-    if carbs is not None:
-        wger_payload["carbohydrates_g"] = carbs
-    if fat is not None:
-        wger_payload["fat_g"] = fat
-    if sugars is not None:
-        wger_payload["carbohydrates_sugar_g"] = sugars
-    if fat_sat is not None:
-        wger_payload["fat_saturated_g"] = fat_sat
-    if fiber is not None:
-        wger_payload["fiber_g"] = fiber
-    if sodium is not None:
-        wger_payload["sodium_g"] = sodium
-
     return {
         "found": True,
         "code": prod.get("code"),
@@ -160,7 +145,6 @@ def _shape(prod: dict[str, Any], lang: str) -> dict[str, Any]:
         "nutriscore_grade": prod.get("nutriscore_grade"),
         "nova_group": prod.get("nova_group"),
         "macros_per_100g": macros_per_100g,
-        "wger_ingredient_payload": wger_payload,
         "source": "openfoodfacts.org",
     }
 
@@ -177,6 +161,43 @@ def build_http() -> httpx.AsyncClient:
 def register(mcp: FastMCP, http: httpx.AsyncClient, settings: Settings) -> None:
     default_language = settings.default_language
 
+    async def _fetch_one(code: str, lang: str) -> dict[str, Any]:
+        """One barcode fetch with a single retry on 429 (rate limit).
+
+        The one path to OFF, for the single lookup and the batch alike: they
+        asked the same question of the same endpoint, so a retry that only one
+        of them had was a difference nobody chose.
+        """
+        for attempt in (1, 2):
+            try:
+                resp = await http.get(
+                    f"/api/v2/product/{code}.json", params={"fields": _fields_for(lang)}
+                )
+            except httpx.HTTPError as exc:
+                return _err(503, f"OFF unreachable: {exc}")
+            if resp.status_code == 429 and attempt == 1:
+                # Respect server's Retry-After if present, else our default.
+                try:
+                    delay = float(resp.headers.get("retry-after") or _RETRY_429_DELAY)
+                except ValueError:
+                    delay = _RETRY_429_DELAY
+                await asyncio.sleep(min(delay, 10.0))
+                continue
+            if resp.status_code >= 400:
+                return _err(resp.status_code, resp.text[:200])
+            try:
+                data = resp.json()
+            except ValueError:
+                return _err(502, "non-JSON response from OFF")
+            if data.get("status") != 1:
+                return {
+                    "found": False,
+                    "code": code,
+                    "detail": data.get("status_verbose") or "product not found",
+                }
+            return _shape(data["product"], lang)
+        return _err(429, "still rate-limited after retry")
+
     @mcp.tool()
     async def lookup_food_by_barcode(
         barcode: Annotated[str, Field(min_length=4, max_length=32)],
@@ -184,8 +205,7 @@ def register(mcp: FastMCP, http: httpx.AsyncClient, settings: Settings) -> None:
     ) -> dict[str, Any]:
         """Look up an EAN/UPC/GTIN barcode on Open Food Facts.
 
-        Returns macros per 100 g plus a ``wger_ingredient_payload`` (normalised
-        per-100 g macros, informational).
+        Returns the product's name, brand and macros per 100 g.
 
         ``language`` is an ISO 639-1 code ('en', 'pl', 'de', ...) selecting which
         localised OFF name/ingredients fields are preferred; it defaults to the
@@ -199,65 +219,14 @@ def register(mcp: FastMCP, http: httpx.AsyncClient, settings: Settings) -> None:
         the product to OFF. After acceptance there it'll sync into your wger
         instance on the next ingredient-sync run.
         """
-        lang = language or default_language
-        try:
-            resp = await http.get(
-                f"/api/v2/product/{barcode}.json", params={"fields": _fields_for(lang)}
+        result = await _fetch_one(barcode, language or default_language)
+        if result.get("found") is False:
+            result["suggestion"] = (
+                "Not in Open Food Facts. You can add it at "
+                f"https://world.openfoodfacts.org/cgi/product.pl?type=add&code={barcode} "
+                "— community-moderated, free. After acceptance it syncs into wger."
             )
-        except httpx.HTTPError as exc:
-            return {"error": True, "status": 503, "detail": f"OFF unreachable: {exc}"}
-        if resp.status_code >= 400:
-            return {"error": True, "status": resp.status_code, "detail": resp.text[:200]}
-        try:
-            data = resp.json()
-        except ValueError:
-            return {"error": True, "status": 502, "detail": "non-JSON response from OFF"}
-        if data.get("status") != 1:
-            return {
-                "found": False,
-                "code": barcode,
-                "detail": data.get("status_verbose") or "product not found",
-                "suggestion": (
-                    "Not in Open Food Facts. You can add it at "
-                    f"https://world.openfoodfacts.org/cgi/product.pl?type=add&code={barcode} "
-                    "— community-moderated, free. After acceptance it syncs into wger."
-                ),
-            }
-        return _shape(data["product"], lang)
-
-    async def _fetch_one(code: str, lang: str) -> dict[str, Any]:
-        """One barcode fetch with a single retry on 429 (rate limit)."""
-        for attempt in (1, 2):
-            try:
-                resp = await http.get(
-                    f"/api/v2/product/{code}.json", params={"fields": _fields_for(lang)}
-                )
-            except httpx.HTTPError as exc:
-                return {"error": True, "status": 503, "detail": str(exc)}
-            if resp.status_code == 429 and attempt == 1:
-                # Respect server's Retry-After if present, else our default.
-                try:
-                    delay = float(resp.headers.get("retry-after") or _RETRY_429_DELAY)
-                except ValueError:
-                    delay = _RETRY_429_DELAY
-                import asyncio as _asyncio
-
-                await _asyncio.sleep(min(delay, 10.0))
-                continue
-            if resp.status_code >= 400:
-                return {
-                    "error": True,
-                    "status": resp.status_code,
-                    "detail": resp.text[:200],
-                }
-            try:
-                data = resp.json()
-            except ValueError:
-                return {"error": True, "status": 502, "detail": "non-JSON"}
-            if data.get("status") != 1:
-                return {"found": False, "code": code}
-            return _shape(data["product"], lang)
-        return {"error": True, "status": 429, "detail": "still rate-limited after retry"}
+        return result
 
     @mcp.tool()
     async def lookup_foods_by_barcodes(
@@ -272,8 +241,6 @@ def register(mcp: FastMCP, http: httpx.AsyncClient, settings: Settings) -> None:
         server's ``DEFAULT_LANGUAGE``."""
         if not barcodes:
             return {"results": {}}
-        import asyncio
-
         lang = language or default_language
         # Deduplicate while preserving order.
         unique = list(dict.fromkeys(barcodes))

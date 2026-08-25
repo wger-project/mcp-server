@@ -5,6 +5,24 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Breaking (response shape):** `lookup_food_by_barcode` and
+  `lookup_foods_by_barcodes` no longer return `wger_ingredient_payload`. It
+  repeated the numbers already in `macros_per_100g` under a second set of keys,
+  shaped for a `create_ingredient` call that cannot exist — wger's REST
+  `/ingredient/` is read-only, and the tool was removed with the move to
+  multi-user auth. Every lookup was paying context for it. The macros
+  themselves are unchanged; read them from `macros_per_100g`.
+* `lookup_food_by_barcode` retries once on a 429 from Open Food Facts,
+  honouring `Retry-After`. The batch variant always did; the two were separate
+  implementations of the same request and now share one, so the difference was
+  never a decision anyone made.
+* Comma-separated values work in an env file, not just in the environment.
+  `ALLOWED_HOSTS=a,b` in `.env` used to abort startup with a parse error, since
+  only the process environment was rewritten to the JSON form the settings
+  loader understands. Affected `ALLOWED_HOSTS`, `MCP_TOOLS`,
+  `MCP_OIDC_ALGORITHMS` and `MCP_OIDC_ALLOWED_USERS`; the JSON spelling keeps
+  working.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always
