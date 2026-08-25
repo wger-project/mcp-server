@@ -13,7 +13,6 @@ notes. This file records important changes to *this package*.
   change either way.
 * README documents `MCP_TOOLS` profiles with measured token costs, and says
   what the full surface costs so the trade is visible rather than guessed at.
-
 * `log_set` and `update_workout_log` reach the rest of wger's log fields:
   `reps_unit` (a plank was stored as 60 repetitions, not 60 seconds),
   `rest`, the `*_target` counterparts of reps/weight/rir/rest, `session_id`
@@ -39,6 +38,11 @@ notes. This file records important changes to *this package*.
 * Routines take `is_template` / `is_public`, days take `need_logs_to_advance`,
   and `update_slot` / `update_slot_entry` can move a slot to another day or an
   entry to another slot.
+* `add_exercise_with_sets` deletes the slot it created when the exercise cannot
+  be attached to it. Such a slot holds no exercise, renders in no plan view and
+  is listed by no routine tool, so a caller could not find it to clean it up. If
+  the cleanup delete fails as well, the response still carries the slot id and
+  reports `slot_rolled_back: false`.
 * `log_set` can attach a set to the plan it was performed from, via the new
   `routine_id`, `slot_entry_id` and `iteration` arguments. Logs written without
   them are freestanding: wger reads a routine's log view and its statistics
