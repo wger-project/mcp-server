@@ -98,6 +98,26 @@ def as_decimal(value: float) -> str:
     return f"{value:g}"
 
 
+# The optional halves of the three above, for the arguments a patch may leave
+# out. Parsing and "absent stays absent" belong together: spelled apart, every
+# call site repeats the None check, and one of them eventually gets it backwards.
+
+
+def opt_uuid(value: str | None, field: str) -> UUID | Unset:
+    """:func:`as_uuid`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_uuid(value, field)
+
+
+def opt_int(value: str | None, field: str) -> int | Unset:
+    """:func:`as_int`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_int(value, field)
+
+
+def opt_decimal(value: float | None) -> str | Unset:
+    """:func:`as_decimal`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_decimal(value)
+
+
 def as_weight_unit(unit: str | None) -> int | None:
     """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``."""
     if unit is None:

@@ -124,6 +124,8 @@ from .common import (
     bad_request,
     language_id_resolver,
     opt,
+    opt_decimal,
+    opt_int,
     require_fields,
     weight_unit_name,
 )
@@ -688,7 +690,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         body = api_models.PatchedSlotRequest(
             order=opt(order),
             comment=opt(comment),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            day=opt_int(day_id, "day_id"),
         )
         require_fields(body)
         updated = await slot_partial_update.asyncio(
@@ -720,19 +722,15 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
                 f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
             )
         body = api_models.PatchedSlotEntryRequest(
-            exercise=(as_int(exercise_id, "exercise_id") if exercise_id is not None else UNSET),
+            exercise=opt_int(exercise_id, "exercise_id"),
             order=opt(order),
             comment=opt(comment),
             repetition_unit=opt(repetition_unit),
             weight_unit=opt(weight_unit),
-            slot=opt(as_int(slot_id, "slot_id") if slot_id is not None else None),
+            slot=opt_int(slot_id, "slot_id"),
             type_=opt(entry_type),
-            repetition_rounding=opt(
-                as_decimal(repetition_rounding) if repetition_rounding is not None else None
-            ),
-            weight_rounding=opt(
-                as_decimal(weight_rounding) if weight_rounding is not None else None
-            ),
+            repetition_rounding=opt_decimal(repetition_rounding),
+            weight_rounding=opt_decimal(weight_rounding),
         )
         require_fields(body)
         updated = await slot_entry_partial_update.asyncio(
@@ -860,12 +858,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             repetition_unit=opt(repetition_unit),
             weight_unit=opt(weight_unit),
             type_=entry_type,
-            repetition_rounding=opt(
-                as_decimal(repetition_rounding) if repetition_rounding is not None else None
-            ),
-            weight_rounding=opt(
-                as_decimal(weight_rounding) if weight_rounding is not None else None
-            ),
+            repetition_rounding=opt_decimal(repetition_rounding),
+            weight_rounding=opt_decimal(weight_rounding),
         )
         created = await slot_entry_create.asyncio(client=api, body=body)
         return created.to_dict()

@@ -27,7 +27,7 @@ from wger_api_client.client import AuthenticatedClient
 
 from ..api_client import paginate
 from ..config import Settings
-from .common import api_list_tool, api_tool, as_uuid, at_noon, opt, require_fields
+from .common import api_list_tool, api_tool, as_uuid, at_noon, opt, opt_uuid, require_fields
 
 # Model field limits, so the caller is told before the server refuses
 CATEGORY_NAME_MAX = 100
@@ -165,7 +165,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             value=opt(value),
             date=opt(at_noon(when)),
             notes=opt(notes),
-            category=opt(as_uuid(category_id, "category_id") if category_id is not None else None),
+            category=opt_uuid(category_id, "category_id"),
         )
         require_fields(body)
         updated = await measurement_partial_update.asyncio(id=entry, client=api, body=body)

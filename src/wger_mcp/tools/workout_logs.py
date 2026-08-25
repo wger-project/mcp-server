@@ -36,6 +36,9 @@ from .common import (
     as_weight_unit,
     at_noon,
     opt,
+    opt_decimal,
+    opt_int,
+    opt_uuid,
     require_fields,
 )
 
@@ -115,19 +118,17 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             weight=as_decimal(weight),
             weight_unit=as_weight_unit(weight_unit),
             date=opt(at_noon(workout_log_date)),
-            rir=opt(as_decimal(rir) if rir is not None else None),
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            slot_entry=opt(
-                as_int(slot_entry_id, "slot_entry_id") if slot_entry_id is not None else None
-            ),
+            rir=opt_decimal(rir),
+            routine=opt_int(routine_id, "routine_id"),
+            slot_entry=opt_int(slot_entry_id, "slot_entry_id"),
             iteration=opt(iteration),
             rest=opt(rest),
-            repetitions_target=opt(as_decimal(reps_target) if reps_target is not None else None),
-            weight_target=opt(as_decimal(weight_target) if weight_target is not None else None),
-            rir_target=opt(as_decimal(rir_target) if rir_target is not None else None),
+            repetitions_target=opt_decimal(reps_target),
+            weight_target=opt_decimal(weight_target),
+            rir_target=opt_decimal(rir_target),
             rest_target=opt(rest_target),
-            session=opt(as_uuid(session_id, "session_id") if session_id is not None else None),
-            next_log=opt(as_uuid(next_log_id, "next_log_id") if next_log_id is not None else None),
+            session=opt_uuid(session_id, "session_id"),
+            next_log=opt_uuid(next_log_id, "next_log_id"),
         )
         created = await workoutlog_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -196,25 +197,23 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         """
         log = as_uuid(log_id, "log_id")
         body = api_models.PatchedWorkoutLogRequest(
-            repetitions=opt(as_decimal(reps) if reps is not None else None),
+            repetitions=opt_decimal(reps),
             repetitions_unit=opt(as_repetition_unit(reps_unit)),
-            weight=opt(as_decimal(weight) if weight is not None else None),
+            weight=opt_decimal(weight),
             weight_unit=opt(as_weight_unit(weight_unit)),
-            rir=opt(as_decimal(rir) if rir is not None else None),
+            rir=opt_decimal(rir),
             date=opt(at_noon(when)),
-            exercise=opt(as_int(exercise_id, "exercise_id") if exercise_id is not None else None),
+            exercise=opt_int(exercise_id, "exercise_id"),
             rest=opt(rest),
-            repetitions_target=opt(as_decimal(reps_target) if reps_target is not None else None),
-            weight_target=opt(as_decimal(weight_target) if weight_target is not None else None),
-            rir_target=opt(as_decimal(rir_target) if rir_target is not None else None),
+            repetitions_target=opt_decimal(reps_target),
+            weight_target=opt_decimal(weight_target),
+            rir_target=opt_decimal(rir_target),
             rest_target=opt(rest_target),
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            slot_entry=opt(
-                as_int(slot_entry_id, "slot_entry_id") if slot_entry_id is not None else None
-            ),
+            routine=opt_int(routine_id, "routine_id"),
+            slot_entry=opt_int(slot_entry_id, "slot_entry_id"),
             iteration=opt(iteration),
-            session=opt(as_uuid(session_id, "session_id") if session_id is not None else None),
-            next_log=opt(as_uuid(next_log_id, "next_log_id") if next_log_id is not None else None),
+            session=opt_uuid(session_id, "session_id"),
+            next_log=opt_uuid(next_log_id, "next_log_id"),
         )
         require_fields(body)
         updated = await workoutlog_partial_update.asyncio(id=log, client=api, body=body)
