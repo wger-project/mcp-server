@@ -199,16 +199,9 @@ def test_stdout_carries_nothing_but_jsonrpc() -> None:
     assert proc.stdout is not None
     assert proc.stderr is not None
 
-    # Kills the child if it never answers, so a hang fails the test instead of
-    # blocking the run: the reads below are on pipes, and closing them is the
-    # only thing that can wake a blocked readline().
     watchdog = threading.Timer(_TIMEOUT, proc.kill)
     watchdog.start()
 
-    # Read the replies *before* closing stdin. EOF on stdin ends the server's
-    # receive loop, which cancels the handlers still in flight — so a client
-    # that writes and immediately hangs up can lose the last response. Real
-    # clients hold the pipe open until their answers arrive; so does this one.
     lines: list[str] = []
     try:
         for request in requests:
@@ -218,7 +211,7 @@ def test_stdout_carries_nothing_but_jsonrpc() -> None:
         expected_replies = sum(1 for r in requests if "id" in r)
         while len(lines) < expected_replies:
             line = proc.stdout.readline()
-            if not line:  # child died or closed stdout
+            if not line:
                 break
             if line.strip():
                 lines.append(line)
