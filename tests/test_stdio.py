@@ -13,6 +13,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -186,25 +187,56 @@ def test_stdout_carries_nothing_but_jsonrpc() -> None:
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     ]
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "wger_mcp.server", "--transport", "stdio"],
-        input="".join(json.dumps(r) + "\n" for r in requests),
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         env=_env(),
-        timeout=_TIMEOUT,
     )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
 
-    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-    assert lines, f"no responses on stdout; stderr was:\n{proc.stderr}"
+    # Kills the child if it never answers, so a hang fails the test instead of
+    # blocking the run: the reads below are on pipes, and closing them is the
+    # only thing that can wake a blocked readline().
+    watchdog = threading.Timer(_TIMEOUT, proc.kill)
+    watchdog.start()
+
+    # Read the replies *before* closing stdin. EOF on stdin ends the server's
+    # receive loop, which cancels the handlers still in flight — so a client
+    # that writes and immediately hangs up can lose the last response. Real
+    # clients hold the pipe open until their answers arrive; so does this one.
+    lines: list[str] = []
+    try:
+        for request in requests:
+            proc.stdin.write(json.dumps(request) + "\n")
+        proc.stdin.flush()
+
+        expected_replies = sum(1 for r in requests if "id" in r)
+        while len(lines) < expected_replies:
+            line = proc.stdout.readline()
+            if not line:  # child died or closed stdout
+                break
+            if line.strip():
+                lines.append(line)
+    finally:
+        watchdog.cancel()
+        proc.stdin.close()
+        stderr = proc.stderr.read()
+        proc.wait(timeout=_TIMEOUT)
+
+    assert lines, f"no responses on stdout; stderr was:\n{stderr}"
     for line in lines:
         message = json.loads(line)  # raises if anything non-JSON slipped in
         assert message["jsonrpc"] == "2.0"
 
     ids = [m.get("id") for m in (json.loads(ln) for ln in lines)]
-    assert ids == [1, 2]
+    assert ids == [1, 2], f"stderr was:\n{stderr}"
     # The startup line proves logging is configured and pointed away from stdout.
-    assert "transport=stdio" in proc.stderr
+    assert "transport=stdio" in stderr
 
 
 @pytest.mark.parametrize(
