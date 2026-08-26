@@ -6,7 +6,7 @@ longer exists on wger >= 2.6.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -35,6 +35,7 @@ from .common import (
     as_uuid,
     as_weight_unit,
     at_noon,
+    day_range_filters,
     opt,
     opt_decimal,
     opt_int,
@@ -142,11 +143,10 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         limit: Annotated[int, Field(ge=1, le=1000)] = 100,
     ) -> list[dict[str, Any]]:
         """List workout log entries (individual sets) with optional date/exercise filters."""
-        filters: dict[str, Any] = {"ordering": "-date"}
-        if date_from is not None:
-            filters["date_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["date_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
+        filters: dict[str, Any] = {
+            "ordering": "-date",
+            **day_range_filters(date_from, date_to),
+        }
         if exercise_id is not None:
             filters["exercise"] = as_int(exercise_id, "exercise_id")
         return await paginate(workoutlog_list.asyncio, client=api, limit=limit, **filters)

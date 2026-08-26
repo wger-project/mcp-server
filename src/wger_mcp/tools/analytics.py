@@ -19,7 +19,7 @@ from wger_api_client.errors import UnexpectedStatus
 
 from ..api_client import paginate
 from ..config import Settings
-from .common import api_tool, as_int, bad_request, opt
+from .common import api_tool, as_int, bad_request, day_bounds, opt
 
 
 class _Metric(NamedTuple):
@@ -449,17 +449,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         b_to = a_from - timedelta(days=1 + gap_days)
         b_from = b_to - timedelta(days=window_days - 1)
 
-        def _start(d: date) -> datetime:
-            return datetime.combine(d, time.min)
-
-        def _end_exclusive(d: date) -> datetime:
-            return datetime.combine(d + timedelta(days=1), time.min)
-
+        a_since, a_until = day_bounds(a_from, a_to)
+        b_since, b_until = day_bounds(b_from, b_to)
         # Two range queries instead of one spanning the gap — when gap_days
         # is non-trivial we'd otherwise fetch (and discard) the gap window.
         logs_a, logs_b = await asyncio.gather(
-            _fetch_logs(api, limit=5000, since=_start(a_from), until=_end_exclusive(a_to)),
-            _fetch_logs(api, limit=5000, since=_start(b_from), until=_end_exclusive(b_to)),
+            _fetch_logs(api, limit=5000, since=a_since, until=a_until),
+            _fetch_logs(api, limit=5000, since=b_since, until=b_until),
         )
 
         ex_cache = await _load_ex_meta(api, logs_a + logs_b, group_by)

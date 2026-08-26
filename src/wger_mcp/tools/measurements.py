@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -27,7 +27,16 @@ from wger_api_client.client import AuthenticatedClient
 
 from ..api_client import paginate
 from ..config import Settings
-from .common import api_list_tool, api_tool, as_uuid, at_noon, opt, opt_uuid, require_fields
+from .common import (
+    api_list_tool,
+    api_tool,
+    as_uuid,
+    at_noon,
+    day_range_filters,
+    opt,
+    opt_uuid,
+    require_fields,
+)
 
 # Model field limits, so the caller is told before the server refuses
 CATEGORY_NAME_MAX = 100
@@ -108,13 +117,12 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
 
         Without a range a growing history has to be pulled in full and trimmed
         by the caller, which spends context on entries nobody asked for."""
-        filters: dict[str, Any] = {"ordering": "-date"}
+        filters: dict[str, Any] = {
+            "ordering": "-date",
+            **day_range_filters(date_from, date_to),
+        }
         if category_id is not None:
             filters["category"] = as_uuid(category_id, "category_id")
-        if date_from is not None:
-            filters["date_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["date_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
         return await paginate(measurement_list.asyncio, client=api, limit=limit, **filters)
 
     @mcp.tool()

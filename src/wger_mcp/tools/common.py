@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
@@ -188,6 +188,35 @@ def at_noon(when: date | datetime | None) -> datetime | None:
     if when is None or isinstance(when, datetime):
         return when
     return datetime.combine(when, _BARE_DATE_TIME)
+
+
+def day_bounds(first: date | None, last: date | None) -> tuple[datetime | None, datetime | None]:
+    """The half-open timestamp range covering the days ``first``..``last``.
+
+    Both ends are inclusive whole days at the tool boundary, while wger stores
+    these as timestamps and filters them with ``date_gte`` / ``date_lt``. The
+    upper bound is therefore midnight *after* ``last``: filtering on ``last``
+    itself would silently drop everything recorded on the final day, which is
+    the one nobody checks. Either end may be ``None``, leaving that side open.
+    """
+    since = None if first is None else datetime.combine(first, time.min)
+    until = None if last is None else datetime.combine(last + timedelta(days=1), time.min)
+    return since, until
+
+
+def day_range_filters(first: date | None, last: date | None) -> dict[str, datetime]:
+    """:func:`day_bounds` as list-endpoint filters, an open end left out.
+
+    Absent rather than ``UNSET``, so an unfiltered call sends no date query at
+    all.
+    """
+    since, until = day_bounds(first, last)
+    filters: dict[str, datetime] = {}
+    if since is not None:
+        filters["date_gte"] = since
+    if until is not None:
+        filters["date_lt"] = until
+    return filters
 
 
 class _Body(Protocol):
