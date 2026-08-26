@@ -5,6 +5,12 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Breaking (response shape):** `add_exercise_with_sets` returns the ids
+  flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
+  one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of
+  the full objects and made every caller map `["slot_entry"]["id"]` onto the
+  `slot_entry_id` parameter the follow-up tools actually take; the flat keys
+  match those parameter names, and the delete tools' responses, verbatim.
 * **Breaking (response shape):** `lookup_food_by_barcode` and
   `lookup_foods_by_barcodes` no longer return `wger_ingredient_payload`. It
   repeated the numbers already in `macros_per_100g` under a second set of keys,

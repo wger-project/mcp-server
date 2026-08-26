@@ -951,7 +951,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         entry_type: str = "normal",
     ) -> dict[str, Any]:
         """High-level convenience: create slot + slot-entry + sets/reps configs
-        in one call. Returns the created ids. Partial failures are reported in
+        in one call. Returns the created ids under the names the follow-up
+        tools take (slot_id, slot_entry_id, sets_config_id, ...).
+        Partial failures are reported in
         the response; if the exercise cannot be attached, the empty slot is
         deleted again, because nothing renders it and it cannot be found later.
 
@@ -988,7 +990,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             )
         except (UnexpectedStatus, httpx.HTTPError) as exc:
             return api_err(exc) | {"stage": "slot"}
-        result["slot"] = {"id": slot.id}
+        result["slot_id"] = slot.id
 
         try:
             entry = await slot_entry_create.asyncio(
@@ -1007,9 +1009,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             # cannot see it to clean it up. Undo it rather than leave it behind.
             rolled_back = await _discard_slot(slot.id)
             if rolled_back:
-                result.pop("slot")
+                result.pop("slot_id")
             return result | api_err(exc) | {"stage": "slot-entry", "slot_rolled_back": rolled_back}
-        result["slot_entry"] = {"id": entry.id}
+        result["slot_entry_id"] = entry.id
 
         # The configs only depend on the entry, so they go out together
         async def _config(kind: str, value: int | str) -> Any:
@@ -1034,7 +1036,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             if isinstance(outcome, BaseException):
                 failed = failed or (kind, outcome)
                 continue
-            result[f"{kind}_config"] = {"id": outcome.id}
+            result[f"{kind}_config_id"] = outcome.id
         if failed is not None:
             kind, exc = failed
             if not isinstance(exc, UnexpectedStatus | httpx.HTTPError):

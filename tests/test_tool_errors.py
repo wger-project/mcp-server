@@ -191,7 +191,7 @@ async def test_failed_exercise_attach_deletes_the_slot(monkeypatch: pytest.Monke
     assert out["error"] is True
     assert out["stage"] == "slot-entry"
     assert out["slot_rolled_back"] is True
-    assert "slot" not in out
+    assert "slot_id" not in out
 
 
 @pytest.mark.asyncio
@@ -217,4 +217,4 @@ async def test_rollback_failure_still_reports_the_slot(monkeypatch: pytest.Monke
         )
     )
     assert out["slot_rolled_back"] is False
-    assert out["slot"]["id"] == 42
+    assert out["slot_id"] == 42
