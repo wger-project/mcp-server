@@ -24,17 +24,40 @@ from wger_api_client.api.measurement_category import (
     measurement_category_retrieve,
 )
 from wger_api_client.client import AuthenticatedClient
+from wger_api_client.models.metric_type_enum import METRIC_TYPE_ENUM_VALUES
 from wger_api_client.types import UNSET
 
 from ..api_client import paginate
 from ..config import Settings
-from .common import api_list_tool, api_tool, as_uuid, at_noon, opt, require_fields
+from .common import (
+    MEASUREMENT_VALUE_MAX,
+    ToolInputError,
+    api_list_tool,
+    api_tool,
+    as_uuid,
+    at_noon,
+    opt,
+    require_fields,
+)
 
 # Model field limits, so the caller is told before the server refuses
 CATEGORY_NAME_MAX = 100
 CATEGORY_UNIT_MAX = 30
 NOTES_MAX = 100
-VALUE_MAX = 5000
+
+
+def as_metric_type(metric_type: str) -> str:
+    """Check a metric type against the ones the schema knows.
+
+    Taken from the generated client rather than spelled out here, so the set
+    follows the server on the next regeneration instead of drifting.
+    """
+    if metric_type not in METRIC_TYPE_ENUM_VALUES:
+        raise ToolInputError(
+            f"unknown metric_type '{metric_type}'; "
+            f"expected one of {', '.join(sorted(METRIC_TYPE_ENUM_VALUES))}"
+        )
+    return metric_type
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
@@ -43,10 +66,35 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     @mcp.tool()
     @api_list_tool
     async def list_measurement_categories(
+        metric_type: str | None = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
     ) -> list[dict[str, Any]]:
-        """List all body measurement categories (e.g. Waist, Chest, Bicep)."""
-        return await paginate(measurement_category_list.asyncio, client=api, limit=limit)
+        """List body measurement categories, optionally of one metric type only.
+
+        Since wger 2.7 a category has a `metric_type` that says what it holds,
+        and the list is no longer only the free-form ones the trainee invented
+        ('Waist', 'Bicep', … which are `custom`). Read these fields before
+        writing to one:
+
+        * `metric_type='blood_pressure'` or `'sleep'` is a **group**: a
+          container that carries no entries of its own. Its readings go into
+          the child categories that have it as their `parent` — systolic and
+          diastolic, or the five sleep stages. Writing to the group is refused.
+        * `is_official=True` marks a category wger itself depends on (body
+          weight today). It cannot be deleted.
+        * `dynamic_type` other than 'NONE' marks a **calculated** category, BMI
+          for instance. The server maintains its entries; creating, editing or
+          deleting one is refused.
+
+        Everything else is a leaf and takes entries normally. Pass `metric_type`
+        to go straight to one — 'body_weight', 'body_fat', 'height',
+        'heart_rate', 'steps', 'sleep_rem' and so on — instead of reading the
+        whole list to find it.
+        """
+        filters: dict[str, Any] = {}
+        if metric_type is not None:
+            filters["metric_type"] = as_metric_type(metric_type)
+        return await paginate(measurement_category_list.asyncio, client=api, limit=limit, **filters)
 
     @mcp.tool()
     @api_tool
@@ -122,7 +170,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     @api_tool
     async def log_measurement(
         category_id: str,
-        value: Annotated[float, Field(gt=0, le=VALUE_MAX)],
+        value: Annotated[float, Field(ge=0, le=MEASUREMENT_VALUE_MAX)],
         when: date | datetime | None = None,
         notes: Annotated[str | None, Field(max_length=NOTES_MAX)] = None,
     ) -> dict[str, Any]:
@@ -154,7 +202,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     @api_tool
     async def update_measurement(
         measurement_id: str,
-        value: Annotated[float | None, Field(gt=0, le=VALUE_MAX)] = None,
+        value: Annotated[float | None, Field(ge=0, le=MEASUREMENT_VALUE_MAX)] = None,
         when: date | datetime | None = None,
         notes: Annotated[str | None, Field(max_length=NOTES_MAX)] = None,
         category_id: str | None = None,

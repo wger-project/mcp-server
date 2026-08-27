@@ -137,15 +137,39 @@ async def test_listing_without_a_range_is_unfiltered(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_a_value_past_wgers_ceiling_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MaxValueValidator(5000) on the model: 50000 is a 400, so the schema
-    says so rather than spending the round trip."""
+async def test_a_value_past_the_column_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the column cap is checked here. What a value may actually be
+    depends on the metric type of its category, which this side does not know."""
     mcp = _register()
     create = _Capture(ENTRY)
     monkeypatch.setattr(measurements.measurement_create, "asyncio", create)
-    with pytest.raises(Exception, match="5000"):
-        await mcp.call_tool("log_measurement", {"category_id": CATEGORY_ID, "value": 50000})
+    with pytest.raises(Exception, match="999999"):
+        await mcp.call_tool("log_measurement", {"category_id": CATEGORY_ID, "value": 10_000_000})
     assert not create.calls
+
+
+@pytest.mark.asyncio
+async def test_a_daily_step_count_is_not_refused_locally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old bound of 5000 was a guess that wger 2.7 outgrew: steps run to
+    100000, so a busy day was rejected before the server ever saw it."""
+    mcp = _register()
+    create = _Capture(ENTRY)
+    monkeypatch.setattr(measurements.measurement_create, "asyncio", create)
+    await mcp.call_tool("log_measurement", {"category_id": CATEGORY_ID, "value": 50000})
+    assert create.body.value == 50000
+
+
+@pytest.mark.asyncio
+async def test_zero_is_a_legitimate_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rest day really is 0 steps, and 0 minutes of REM is a night wger
+    accepts. The lower bound of every cumulative metric is 0, not more than 0."""
+    mcp = _register()
+    create = _Capture(ENTRY)
+    monkeypatch.setattr(measurements.measurement_create, "asyncio", create)
+    await mcp.call_tool("log_measurement", {"category_id": CATEGORY_ID, "value": 0})
+    assert create.body.value == 0
 
 
 @pytest.mark.asyncio
@@ -196,3 +220,45 @@ async def test_an_ordinary_measurement_still_goes_through(
         "value": 82.5,
         "notes": "morning, fasted",
     }
+
+
+# ---------- finding a typed category ----------
+
+
+@pytest.mark.asyncio
+async def test_categories_can_be_narrowed_to_one_metric_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Since 2.7 the list also holds the official body-weight category, the
+    group containers and their components, so 'which one is the waist' is no
+    longer answerable by reading the first page."""
+    listing = _Capture(api_models.PaginatedCategoryList(count=1, results=[CATEGORY]))
+    monkeypatch.setattr(measurements.measurement_category_list, "asyncio", listing)
+    mcp = _register()
+    await mcp.call_tool("list_measurement_categories", {"metric_type": "body_weight"})
+    assert listing.calls[-1]["metric_type"] == "body_weight"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_metric_type_never_reaches_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listing = _Capture(api_models.PaginatedCategoryList(count=0, results=[]))
+    monkeypatch.setattr(measurements.measurement_category_list, "asyncio", listing)
+    mcp = _register()
+    out = _result(await mcp.call_tool("list_measurement_categories", {"metric_type": "waist"}))
+    assert not listing.calls
+    message = json.dumps(out)
+    assert "waist" in message
+    assert "body_weight" in message  # the error names the valid options
+
+
+@pytest.mark.asyncio
+async def test_listing_categories_unfiltered_sends_no_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listing = _Capture(api_models.PaginatedCategoryList(count=1, results=[CATEGORY]))
+    monkeypatch.setattr(measurements.measurement_category_list, "asyncio", listing)
+    mcp = _register()
+    await mcp.call_tool("list_measurement_categories", {})
+    assert "metric_type" not in listing.calls[-1]
