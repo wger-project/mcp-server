@@ -8,8 +8,8 @@ An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https:/
 It talks to a wger instance over its public REST API — it is a separate service and requires no changes to wger itself.
 
 - **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** (FastMCP) for a shared deployment. Pick with `--transport`.
-- **Auth:** **multi-user via OIDC SSO** — any OIDC IdP (Keycloak, Authentik, Auth0, Okta, …). Every request acts as the calling user's own wger account. For single-user self-hosting without an IdP, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
-- **Requires:** wger >= 2.6, Python >= 3.11.
+- **Auth:** **multi-user** — every request acts as the calling user's own wger account. On wger >= 2.7, wger is itself the OAuth2/OIDC provider and nothing else is needed ([`MCP_AUTH=wger_oidc`](#wger_oidc--wger-is-the-provider-recommended)); on 2.6, or behind an existing SSO, an external OIDC IdP does the same job with a token exchange ([`MCP_AUTH=oidc`](#oidc--an-external-idp)). For single-user self-hosting, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
+- **Requires:** wger >= 2.6 (>= 2.7 for `wger_oidc`), Python >= 3.11.
 
 ## How auth works
 
@@ -18,7 +18,29 @@ server. Running locally over stdio? None of it applies — skip to
 [Quick start — local, over stdio](#quick-start--local-over-stdio), where a wger
 API key is the only credential.
 
-wger 2.6 added OIDC SSO (allauth) and issues its own JWTs; its REST API only accepts wger-native credentials. So this server is **multi-user** and uses a shared OIDC identity provider (the same one wger logs in with). Per request:
+Every request acts as the calling user's own wger account, so the server needs a
+per-user wger credential. Where that comes from is the one real choice, and wger
+2.7 changed the answer.
+
+**On wger >= 2.7 — `MCP_AUTH=wger_oidc`, the short path.** wger is itself an
+OAuth2/OIDC provider *and* its REST API accepts the access tokens it issues.
+There is nothing to broker: the caller's token goes back out unchanged.
+
+```text
+client → MCP    Authorization: Bearer <wger token>   (via MCP-native OAuth)
+MCP → wger      Authorization: Bearer <the same token>  on /api/v2/*
+```
+
+No identity provider, no client credentials, no exchange — `WGER_BASE_URL` is the
+entire configuration. Because the login runs in the user's browser through wger's
+own login page, **MFA enrolled in wger simply works**. The tokens are opaque, so
+this server does not validate them: wger decides on every call whether a token is
+live and which scopes it carries. See
+[docs/adr/0005-native-wger-oidc.md](docs/adr/0005-native-wger-oidc.md).
+
+**On wger 2.6, or behind an existing SSO — `MCP_AUTH=oidc`.** wger 2.6 issues its
+own JWTs and its API accepts only wger-native credentials, so an IdP token has to
+be traded for one:
 
 ```text
 client → MCP    Authorization: Bearer <OIDC token>   (via MCP-native OAuth, or sent directly)
@@ -29,6 +51,8 @@ MCP → wger      Authorization: Bearer <wger JWT>  on /api/v2/*   (cached ~5 mi
 ```
 
 Provider-agnostic: JWKS/token endpoints come from the IdP's discovery document (`{issuer}/.well-known/openid-configuration`). No per-user secrets are stored — the wger access token is cached in memory and re-derived on expiry. See [docs/adr/0001-multi-user-auth-via-oidc-token-exchange.md](docs/adr/0001-multi-user-auth-via-oidc-token-exchange.md).
+
+Either way this server stores nothing: no database, no per-user secrets on disk.
 
 ## Install
 
@@ -99,11 +123,15 @@ Configuration comes from environment variables, or from a `.env` file in the dir
 ```bash
 curl -O https://raw.githubusercontent.com/wger-project/mcp-server/master/.env.example
 mv .env.example .env
-# Edit .env: set WGER_BASE_URL, OIDC_ISSUER, OIDC_CLIENT_ID/SECRET, WGER_OIDC_AUDIENCE.
+# Edit .env. Against wger >= 2.7 that is two lines:
+#   MCP_AUTH=wger_oidc
+#   WGER_BASE_URL=https://wger.de
 uvx wger-mcp
 ```
 
 Server listens on `http://0.0.0.0:8765`, MCP endpoint at `/mcp`.
+
+On wger 2.6, or with an existing SSO in front, set `MCP_AUTH=oidc` instead and fill in `OIDC_ISSUER`, `OIDC_CLIENT_ID`/`SECRET` and `WGER_OIDC_AUDIENCE` — see [`oidc`](#oidc--an-external-idp).
 
 Just trying it against your own account? The [`static_token`](#static_token--single-user-no-idp-required) strategy needs only a wger API key and no IdP:
 
@@ -123,7 +151,9 @@ cp .env.example .env
 uv run wger-mcp
 ```
 
-## Prerequisites at the IdP & wger
+## Prerequisites for `MCP_AUTH=oidc` (external IdP)
+
+Only for the external-IdP mode. Under [`wger_oidc`](#wger_oidc--wger-is-the-provider-recommended) none of this applies — the prerequisites there live in wger, and are listed in that section.
 
 - **wger** is configured with your IdP as an OIDC social-login provider (`WGER_SOCIAL_PROVIDERS`), so `provider/token` accepts its tokens. `WGER_ALLAUTH_PROVIDER` must match wger's provider id — the slug in wger's `SocialApp` (e.g. `keycloak` or `openid_connect`); it's the `<id>` in the OAuth callback path `/account/oidc/<id>/login/callback/`.
 - **IdP** has a *confidential* client for this server (`OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`) with **token-exchange (RFC 8693)** enabled and permitted to exchange to wger's client audience (`WGER_OIDC_AUDIENCE`). On Keycloak that means enabling *Standard Token Exchange* and adding an *Audience* mapper that includes the wger client (otherwise the exchange fails with `Requested audience not available`).
@@ -133,15 +163,40 @@ uv run wger-mcp
 
 Pick one with `MCP_AUTH=`. The server gates **every** request to `/mcp/*`. `/health`, `/.well-known/*` and the AS-facade endpoints (`/authorize`, `/token` by default) are always public.
 
-| Strategy | Users | Needs an IdP? | Safe to expose? |
-|---|---|---|---|
-| [`oidc`](#oidc-default) (default) | multi-user, each acts as themselves | yes | yes |
-| [`static_token`](#static_token--single-user-no-idp-required) | single-user (shared wger account) | no | yes, over TLS |
-| [`none`](#none--no-inbound-authentication) | single-user, unauthenticated | no | **no — localhost only** |
+| Strategy | Users | Needs an IdP? | Requires | Safe to expose? |
+|---|---|---|---|---|
+| [`wger_oidc`](#wger_oidc--wger-is-the-provider-recommended) **(recommended)** | multi-user, each acts as themselves | no — wger *is* the provider | wger >= 2.7 | yes |
+| [`oidc`](#oidc--an-external-idp) (default) | multi-user, each acts as themselves | yes — external IdP / wger < 2.7 | wger >= 2.6 | yes |
+| [`static_token`](#static_token--single-user-no-idp-required) | single-user (shared wger account) | no | wger >= 2.6 | yes, over TLS |
+| [`none`](#none--no-inbound-authentication) | single-user, unauthenticated | no | wger >= 2.6 | **no — localhost only** |
 
-### `oidc` (default)
+`oidc` remains the built-in default so that no existing deployment changes behaviour on upgrade. New deployments against wger >= 2.7 should set `MCP_AUTH=wger_oidc` explicitly.
 
-Validates an IdP-issued Bearer token against the IdP's JWKS, then exchanges it for a wger credential (see *How auth works*).
+### `wger_oidc` — wger is the provider (recommended)
+
+Takes the caller's wger access token and puts it on the outbound API call unchanged. The whole configuration:
+
+```ini
+MCP_AUTH=wger_oidc
+WGER_BASE_URL=https://wger.example.com
+MCP_PUBLIC_URL=https://mcp.example.com   # this server's public base URL
+#MCP_WGER_SCOPES=openid api:read api:write   # what to ask wger for (default)
+#MCP_OIDC_ALLOWED_USERS=alice,bob            # optional allowlist
+```
+
+**At wger** the provider has to be switched on (`IDP_OIDC_PRIVATE_KEY`, from `./manage.py generate-oidc-key`) and, unless dynamic client registration is enabled there, an OAuth client row has to exist for each MCP client — see wger's [`docs/administration/oauth2_provider.rst`](https://wger.readthedocs.io/en/latest/administration/oauth2_provider.html). wger's authorize/token endpoints are read from its discovery document at `{WGER_BASE_URL}/.well-known/openid-configuration`.
+
+Notes on what this mode does and does not do:
+
+- **The token is not validated here.** wger's access tokens are opaque — there is nothing to check against a JWKS, and wger re-checks the token and its scopes on every API call anyway. A revoked or expired token is therefore noticed at the first API call, and reported as such (see below).
+- **Scopes.** wger gates reads behind `api:read` and every write behind `api:write`; `openid` identifies the user. A grant that is missing one produces a `403` naming the scope, which the tools surface with a *re-authorize this connection* hint rather than as a generic failure. For a read-only deployment, drop `api:write` from `MCP_WGER_SCOPES` and pair it with a read-only [`MCP_TOOLS`](#registering-only-some-groups) selection.
+- **MFA works.** The authorization-code flow runs in the user's browser against wger's own login, so TOTP/WebAuthn enrolled in wger applies. This is the one thing the token-exchange mode cannot do.
+- **The allowlist costs one request per token.** `MCP_OIDC_ALLOWED_USERS` needs a name, and an opaque token carries none, so the server asks wger's `/api/v2/userprofile/` once per token and caches the answer in memory — keyed by a SHA-256 fingerprint, never by the token. Without an allowlist configured, no such lookup happens at all.
+- **If wger is reached over an internal URL**, set `OIDC_AUTHORIZATION_ENDPOINT` to wger's *public* authorize URL: `/authorize` is followed by the user's browser, and discovery against an internal hostname returns internal URLs.
+
+### `oidc` — an external IdP
+
+Validates an IdP-issued Bearer token against the IdP's JWKS, then exchanges it for a wger credential (see *How auth works*). Use this for wger 2.6, or where an SSO provider already fronts everything.
 
 ```ini
 MCP_AUTH=oidc
@@ -161,36 +216,59 @@ JWKS and token endpoints are resolved from the IdP's discovery document (overrid
 
 Interactive MCP clients discover the IdP via OAuth Protected Resource Metadata at `/.well-known/oauth-protected-resource` (a `401` also advertises it in `WWW-Authenticate`). Set `MCP_PUBLIC_URL` to the externally reachable base URL so the advertised resource identifier is correct.
 
-#### Authorization-Server facade
+### Authorization-Server facade
 
-Some MCP clients — notably **claude.ai**'s custom connector — do **not** follow the `authorization_servers` pointer to a separate IdP host. They treat the MCP server's own origin as the OAuth authorization server: they fetch `{origin}/.well-known/oauth-authorization-server` and run `/authorize` + `/token` against that origin. They also need the OAuth endpoints reachable from where the *client* runs — for a cloud client like claude.ai, the public internet — while the IdP itself can stay private.
+Applies to both OAuth modes. Some MCP clients — notably **claude.ai**'s custom connector — do **not** follow the `authorization_servers` pointer to a different host. They treat the MCP server's own origin as the OAuth authorization server: they fetch `{origin}/.well-known/oauth-authorization-server` and run `/authorize` + `/token` against that origin. They also need the OAuth endpoints reachable from where the *client* runs — for a cloud client like claude.ai, the public internet — while the IdP itself can stay private.
 
-To support this, the server exposes a thin **AS facade** in `oidc` mode:
+To support this, the server exposes a thin **AS facade** in both OAuth modes (`wger_oidc` and `oidc`):
 
 | Path | Behaviour |
 |------|-----------|
 | `/.well-known/oauth-protected-resource` | `authorization_servers` = **this origin** (self) |
 | `/.well-known/oauth-authorization-server` | RFC 8414 metadata; `authorization_endpoint`/`token_endpoint` on **this origin** |
-| `/authorize` | `302` to the IdP's authorization endpoint (front-channel browser login) |
-| `/token` | reverse-proxies to the IdP's token endpoint (back-channel) |
+| `/authorize` | `302` to the provider's authorization endpoint (front-channel browser login) |
+| `/token` | reverse-proxies to the provider's token endpoint (back-channel) |
+| `/register` | reverse-proxies dynamic client registration — only when the provider offers it |
 
-The facade paths default to the conventional `/authorize` and `/token` — clients like claude.ai assume those and ignore the `authorization_endpoint` in the AS metadata. Override with `OAUTH_AUTHORIZE_PATH` / `OAUTH_TOKEN_PATH` if a client expects something else (no rebuild needed).
+The facade paths default to the conventional `/authorize`, `/token` and `/register` — clients like claude.ai assume those and ignore the `authorization_endpoint` in the AS metadata. Override with `OAUTH_AUTHORIZE_PATH` / `OAUTH_TOKEN_PATH` / `OAUTH_REGISTER_PATH` if a client expects something else (no rebuild needed).
 
-The IdP (e.g. Keycloak) never has to be publicly reachable: the user's browser reaches it for the login redirect, and the back-channel token request is proxied through this server. Tokens are still minted and signed by the IdP, so inbound validation (`iss` = IdP) is unchanged. The IdP's `authorize`/`token` endpoints come from discovery (override with `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT`). See [docs/adr/0003-oauth-authorization-server-facade.md](docs/adr/0003-oauth-authorization-server-facade.md).
+Set `MCP_AS_FACADE=false` to switch the facade off entirely: the metadata then names the provider directly and this origin serves no OAuth endpoints. Correct only if every client you care about follows the `authorization_servers` pointer — claude.ai does not.
+
+#### Scopes and registration under `wger_oidc`
+
+
+Two things the facade does only in this mode, both for the same reason — a generic MCP client has no way of knowing that wger's API is gated behind `api:read`/`api:write`:
+
+- **`/register` is advertised and proxied** when wger has dynamic client registration switched on (it publishes a `registration_endpoint` in its discovery document exactly then, so there is nothing to configure here). With DCR the connector flow is one URL; without it, every client needs an OAuth client row created in wger by hand.
+- **The API scopes are added** to the proxied registration and to the `/authorize` query, on top of whatever the client asked for. A client that registers with `openid` alone is otherwise refused at `/authorize` with `invalid_scope` — allauth requires the requested scopes to be a subset of the client's — and nothing in that failure tells anyone why. What the facade adds is exactly what the consent screen then shows the user.
+
+#### Reachability and endpoints
+
+The provider never has to be publicly reachable: the user's browser reaches it for the login redirect, and the back-channel requests are proxied through this server. Tokens are still minted by the provider, so nothing about how they are checked changes. Its `authorize`/`token` endpoints come from discovery — of `WGER_BASE_URL` under `wger_oidc`, of `OIDC_ISSUER` under `oidc` — and are overridable with `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` in either mode. See [docs/adr/0003-oauth-authorization-server-facade.md](docs/adr/0003-oauth-authorization-server-facade.md).
 
 `MCP_PUBLIC_URL` **must** be set to the externally reachable base URL so the advertised endpoints point at the public origin (otherwise they're derived from the request's `X-Forwarded-*` / `Host`).
 
-##### Adding the connector in claude.ai
+#### Adding the connector in claude.ai
+
+Under **`wger_oidc`**:
+
+1. In wger, create an OAuth client with redirect URI `https://claude.ai/api/mcp/auth_callback` (`CONFIDENTIAL`, scopes `openid api:read api:write`) — see wger's `oauth2_provider` docs. Skip this if wger has dynamic client registration enabled; the connector then registers itself through `/register`.
+2. In claude.ai → *Add custom connector*: URL `https://<public-host>/mcp`. With a hand-made client, put its id and secret under *Advanced settings*.
+3. Approve the consent screen wger shows. It names the scopes, which is the only moment the user sees that they are granting write access to their training, nutrition and body data.
+
+Under **`oidc`**:
 
 1. At the IdP, the confidential client (`OIDC_CLIENT_ID`) needs redirect URI `https://claude.ai/api/mcp/auth_callback` and web origin `https://claude.ai`, plus *Standard flow* and the token-exchange / audience-mapper setup from *Prerequisites* above.
 2. In claude.ai → *Add custom connector*: URL `https://<public-host>/mcp`; under *Advanced settings* set Client ID / secret to the IdP client's.
-3. Verify discovery before connecting:
-   ```bash
-   curl -s https://<public-host>/.well-known/oauth-protected-resource | jq
-   curl -s https://<public-host>/.well-known/oauth-authorization-server | jq
-   ```
 
-> The interactive `/authorize` step `302`s the browser to the IdP, so the **browser** must reach the IdP. With a split-horizon / LAN-only IdP that means running the browser on that network; the back-channel `/token` is always proxied through this server.
+Either way, verify discovery before connecting:
+
+```bash
+curl -s https://<public-host>/.well-known/oauth-protected-resource | jq
+curl -s https://<public-host>/.well-known/oauth-authorization-server | jq
+```
+
+> The interactive `/authorize` step `302`s the browser to the provider, so the **browser** must reach it. With a split-horizon / LAN-only provider that means running the browser on that network; the back-channel `/token` is always proxied through this server.
 
 ### `static_token` — single-user, no IdP required
 
@@ -381,8 +459,9 @@ Anything tracked with a tape measure. Categories are the user's own (Waist, Ches
 ### Interactive (MCP-native OAuth)
 
 Point the client at the Streamable HTTP URL. On first use it fetches
-`/.well-known/oauth-protected-resource`, runs the OAuth flow against the IdP,
-and attaches the resulting Bearer token automatically.
+`/.well-known/oauth-protected-resource`, runs the OAuth flow against the
+provider — wger itself under `wger_oidc` — and attaches the resulting Bearer
+token automatically.
 
 ```json
 {
@@ -397,10 +476,13 @@ and attaches the resulting Bearer token automatically.
 
 ### Scripts / headless (manual Bearer)
 
-Obtain an OIDC token out-of-band and pass it as `Authorization: Bearer <token>`.
-See `scripts/get_token.py` for a device-flow example. The token's
-audience must be acceptable to the server (`MCP_OIDC_AUDIENCE`); the server then
-exchanges it for a wger credential.
+Obtain a token out-of-band and pass it as `Authorization: Bearer <token>`.
+See `scripts/get_token.py` for a device-flow example.
+
+Under `wger_oidc` that is a wger access token — from any of wger's own grants,
+the device-code flow included — and it is used as-is. Under `oidc` it is an IdP
+token whose audience must be acceptable to the server (`MCP_OIDC_AUDIENCE`),
+which the server then exchanges for a wger credential.
 
 ## Deployment
 
@@ -433,12 +515,13 @@ so that streamable-HTTP/SSE responses aren't buffered.
   - [0002](docs/adr/0002-opaque-string-resource-ids.md) — opaque string resource ids
   - [0003](docs/adr/0003-oauth-authorization-server-facade.md) — the OAuth authorization-server facade
   - [0004](docs/adr/0004-static-token-strategy-for-single-user.md) — the `static_token` strategy
+  - [0005](docs/adr/0005-native-wger-oidc.md) — native wger OIDC, superseding the transport half of 0001
 
 ## Development
 
 ```bash
 uv sync --dev
-uv run pytest        # inbound auth (OIDC + static token), token exchange, wger client, tools
+uv run pytest        # inbound auth (all four strategies), token exchange, wger client, tools
 uv run ruff check .
 ```
 

@@ -1,4 +1,12 @@
-"""Outbound credential: turn an SSO (OIDC) token into a wger JWT.
+"""Outbound credential: what goes into ``Authorization`` on a wger API call.
+
+Three shapes, one per inbound strategy, all behind :class:`WgerTokenProvider`:
+
+- ``wger_oidc`` — **pass-through**. wger issued the caller's token and accepts
+  it on its own API, so it is forwarded unchanged. Nothing to exchange, nothing
+  to cache (ADR 0005).
+- ``static_token`` / ``none`` — a personal wger API key, the same for everyone.
+- ``oidc`` — the two-hop exchange below, for an external IdP (ADR 0001).
 
 Two hops (see ADR 0001):
 
@@ -201,9 +209,15 @@ def _extract_wger_jwt(payload: dict[str, Any]) -> str | None:
 class WgerTokenProvider:
     """Supplies the ``Authorization`` header value for an outbound wger call.
 
-    - ``oidc`` mode: per-request, exchange the caller's SSO token for a
-      wger JWT → ``Bearer <jwt>``.
-    - ``dev`` mode (``MCP_AUTH=none``): a static personal DRF key → ``Token <key>``.
+    - ``pass_through`` mode (``MCP_AUTH=wger_oidc``): the caller's own wger
+      token, forwarded verbatim → ``Bearer <token>``.
+    - ``exchanger`` mode (``MCP_AUTH=oidc``): per-request, exchange the caller's
+      SSO token for a wger JWT → ``Bearer <jwt>``.
+    - ``dev`` mode (``MCP_AUTH=none`` / ``static_token``): a static personal DRF
+      key → ``Token <key>``.
+
+    One class rather than three so the single call site in ``api_client`` and
+    the lifespan teardown do not have to know which mode is running.
     """
 
     def __init__(
@@ -211,13 +225,22 @@ class WgerTokenProvider:
         *,
         exchanger: TokenExchanger | None = None,
         dev_token: str | None = None,
+        pass_through: bool = False,
     ) -> None:
-        if exchanger is None and not dev_token:
-            raise ValueError("WgerTokenProvider needs either an exchanger or a dev_token")
+        if not pass_through and exchanger is None and not dev_token:
+            raise ValueError(
+                "WgerTokenProvider needs pass_through, an exchanger or a dev_token"
+            )
         self._exchanger = exchanger
         self._dev_token = dev_token
+        self._pass_through = pass_through
 
     async def authorization_header(self) -> str:
+        if self._pass_through:
+            identity = current_identity()
+            if identity is None or not identity.inbound_token:
+                raise WgerTokenError("no caller identity bound to this request")
+            return f"Bearer {identity.inbound_token}"
         if self._exchanger is None:
             return f"Token {self._dev_token}"
         identity = current_identity()

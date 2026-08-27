@@ -1,16 +1,16 @@
 """OAuth 2.0 Protected Resource Metadata (RFC 9728) for MCP-native auth.
 
 Interactive MCP clients (e.g. Claude) discover where to authenticate by
-fetching ``/.well-known/oauth-protected-resource``. We point them at our SSO
-IdP as the authorization server; the client runs the OAuth flow with the IdP
-and presents the resulting token to this server.
+fetching ``/.well-known/oauth-protected-resource``. It names the authorization
+server to run the OAuth flow against, and the scopes this resource expects the
+resulting token to carry.
 """
 
 from __future__ import annotations
 
 from starlette.requests import Request
 
-from ..config import Settings
+from ..config import AuthStrategy, Settings
 
 WELL_KNOWN_PATH = "/.well-known/oauth-protected-resource"
 
@@ -55,14 +55,37 @@ def resource_metadata_url(settings: Settings, *, origin: str | None = None) -> s
     return resource_identifier(settings, origin=origin) + WELL_KNOWN_PATH
 
 
+def authorization_server(settings: Settings, *, origin: str | None = None) -> str:
+    """Which origin clients should run the OAuth flow against.
+
+    Normally this server itself: it fronts the provider as an AS facade (see
+    ``auth/asfacade.py``) because claude.ai and others drive ``/authorize`` and
+    ``/token`` against the MCP origin regardless of what is advertised here, and
+    a facade is also what lets a private IdP stay private.
+
+    ``MCP_AS_FACADE=false`` points at the real provider instead — honest, and
+    one hop shorter, for a deployment whose clients all follow the pointer.
+    """
+    if settings.mcp_as_facade:
+        return resource_identifier(settings, origin=origin)
+    issuer = (
+        settings.wger_base_url
+        if settings.mcp_auth is AuthStrategy.wger_oidc
+        else settings.oidc_issuer
+    )
+    return str(issuer).rstrip("/")
+
+
 def protected_resource_metadata(settings: Settings, *, origin: str | None = None) -> dict:
-    # This server fronts the IdP as an OAuth AS facade (see auth/asfacade.py), so
-    # it advertises *itself* as the authorization server. Clients then fetch our
-    # /.well-known/oauth-authorization-server and drive the flow against this
-    # origin — the private IdP never needs to be reachable by the client.
-    base = resource_identifier(settings, origin=origin)
-    return {
-        "resource": base,
-        "authorization_servers": [base],
+    meta = {
+        "resource": resource_identifier(settings, origin=origin),
+        "authorization_servers": [authorization_server(settings, origin=origin)],
         "bearer_methods_supported": ["header"],
     }
+    # Only under wger_oidc do we know what the token has to carry: there the
+    # scopes are wger's own and this server is the one asking for them. With an
+    # external IdP the mapping is the deployment's business, so saying nothing
+    # beats guessing.
+    if settings.mcp_auth is AuthStrategy.wger_oidc:
+        meta["scopes_supported"] = list(settings.mcp_wger_scopes)
+    return meta

@@ -79,6 +79,49 @@ async def test_list_tools_wrap_the_error_in_a_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_expired_token_is_reported_as_needing_re_authentication() -> None:
+    """A model that gets a bare 401 retries. Under wger_oidc the token is the
+    caller's own and a retry cannot mint a new one, so the response has to say
+    that the connection itself must be authorized again."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise UnexpectedStatus(401, b'{"detail": "Invalid token."}')
+
+    out = await tool()
+    assert out["status"] == 401
+    assert "authorized again" in out["hint"]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_scope_names_the_scope() -> None:
+    """wger says which one in the body; repeating "403" would leave the user to
+    guess which half of the grant is short."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise UnexpectedStatus(
+            403, b'{"detail": "The access token is missing the \\"api:write\\" scope."}'
+        )
+
+    out = await tool()
+    assert out["status"] == 403
+    assert "api:write" in out["hint"]
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_403_carries_no_re_authorization_hint() -> None:
+    """Not every 403 is a scope problem — someone else's routine is just not
+    yours, and telling the user to reconnect would send them nowhere."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise UnexpectedStatus(403, b'{"detail": "Not found."}')
+
+    assert "hint" not in await tool()
+
+
+@pytest.mark.asyncio
 async def test_a_response_parse_error_is_not_reported_as_a_bad_argument() -> None:
     """Only ToolInputError means "your argument was wrong"; a ValueError from
     parsing the response must not be relabelled as one."""
