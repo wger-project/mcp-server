@@ -3,13 +3,13 @@
 > [!IMPORTANT]
 > This is still a WIP, not all things might work correctly yet
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https://wger.de) (>= 2.6) fitness/nutrition REST API as tools (routines, workout logging, exercise & ingredient catalog, nutrition plans + meals + recipes, diary, body-weight tracking, gym equipment, body measurements, volume/PR analytics, daily calorie calculator, …) so that AI assistants can read and write your wger data.
+An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https://wger.de) (>= 2.7) fitness/nutrition REST API as tools (routines, workout logging, exercise & ingredient catalog, nutrition plans + meals + recipes, diary, body-weight tracking, gym equipment, body measurements, volume/PR analytics, daily calorie calculator, …) so that AI assistants can read and write your wger data.
 
 It talks to a wger instance over its public REST API — it is a separate service and requires no changes to wger itself.
 
 - **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** (FastMCP) for a shared deployment. Pick with `--transport`.
 - **Auth:** **multi-user via OIDC SSO** — any OIDC IdP (Keycloak, Authentik, Auth0, Okta, …). Every request acts as the calling user's own wger account. For single-user self-hosting without an IdP, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
-- **Requires:** wger >= 2.6, Python >= 3.11.
+- **Requires:** wger >= 2.7, Python >= 3.11.
 
 ## How auth works
 
@@ -294,8 +294,8 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 
 | Tool | Description |
 |------|-------------|
-| `log_workout_session(routine_id?, day_id?, when?, notes?, impression?, time_start?, time_end?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `time_start`/`time_end` are `HH:MM` and must be given together. One session per routine per date |
-| `list_workout_sessions(when?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first. wger filters on an exact date, so `when` takes one day rather than a range |
+| `log_workout_session(routine_id?, day_id?, started_at?, ended_at?, notes?, impression?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `started_at`/`ended_at` are full timestamps, so a session may run past midnight; a bare date lands at 12:00. Leaving `ended_at` out keeps the session open, to be closed by a patch when the workout ends |
+| `list_workout_sessions(date_from?, date_to?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first, optionally within a date range (both inclusive). The range is cut on the day a session *started*, which is the day it counts for |
 | `update_workout_session(session_id, ...)` / `delete_workout_session(session_id)` | Patch / delete a session. Deleting takes its logged sets with it |
 
 ### Body weight

@@ -5,6 +5,36 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+**Requires wger 2.7.** 
+ 
+The 2.7 API renamed and retyped fields this server
+writes to, so a single build cannot serve both releases. See below for what
+changed at the tool boundary.
+
+* **Breaking (arguments):** `log_workout_session` and `update_workout_session`
+  take `started_at` / `ended_at` instead of `when` / `time_start` / `time_end`.
+  wger 2.7 stores a session as two timestamps rather than a date plus two wall
+  times, so a session may now run past midnight. Both arguments accept a full
+  timestamp or a bare date, which lands at 12:00 like everywhere else. Passing
+  only `ended_at` is no longer an error: a session without an end is one that is
+  still running, and closing it is a patch.
+* **Breaking (arguments):** `list_workout_sessions` takes `date_from` /
+  `date_to` instead of `when`. 2.7 can filter sessions over a range, so the
+  single-day restriction the old argument existed for is gone; pass the same day
+  twice for one day. The range is cut on the day a session *started*.
+* **Fixed:** `update_body_weight_entry` and `delete_body_weight_entry` accept
+  the UUID that wger 2.7 identifies a weight entry by. The `WeightEntry` table
+  was merged into body-weight measurements and the endpoint's integer ids went
+  with it, so both tools rejected every valid id.
+* **Fixed:** patching a measurement no longer rewrites its `source`. The
+  generated client fills that field in with `user` unless it is explicitly
+  unset, so editing the note on an entry imported from Apple Health or Health
+  Connect would have claimed it as hand-entered — and an otherwise empty patch
+  would have been sent instead of refused.
+* Sessions no longer claim that wger allows only one per routine per date. 2.7
+  dropped that constraint, and repeating it steered assistants into patching an
+  existing session when a second one was wanted.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always
