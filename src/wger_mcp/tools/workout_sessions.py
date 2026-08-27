@@ -8,7 +8,7 @@ what make its own fields reachable.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -31,6 +31,7 @@ from .common import (
     api_tool,
     as_int,
     as_uuid,
+    at_noon,
     bad_request,
     opt,
     require_fields,
@@ -39,9 +40,6 @@ from .common import (
 # wger stores the impression as a bare digit. An assistant handed a '1' has
 # nothing to read it by and guesses; the trainee's own word for it does not.
 IMPRESSIONS: dict[str, str] = {"bad": "1", "neutral": "2", "good": "3"}
-
-# 'HH:MM' or 'HH:MM:SS', the same shape create_meal takes
-_TIME_PATTERN = r"^\d{2}:\d{2}(:\d{2})?$"
 
 
 def as_impression(impression: str | None) -> str | None:
@@ -60,21 +58,25 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     @mcp.tool()
     @api_list_tool
     async def list_workout_sessions(
-        when: date | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         routine_id: str | None = None,
         impression: str | None = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 20,
     ) -> list[dict[str, Any]]:
-        """List workout sessions, newest first.
+        """List workout sessions, newest first, optionally within a date range.
+        Both dates are inclusive; pass the same day twice for a single day.
 
-        wger filters sessions on an exact date only, so `when` takes one day
-        rather than a range; for a period, read the most recent `limit`
-        sessions and go by their dates. impression filters on how the sessions
-        felt: 'bad', 'neutral' or 'good'.
+        The range is cut on the day a session *started*, which is the day it
+        counts for: an overnight session belongs to the evening it began, not
+        to the morning it ended. impression filters on how the sessions felt:
+        'bad', 'neutral' or 'good'.
         """
-        filters: dict[str, Any] = {"ordering": "-date"}
-        if when is not None:
-            filters["date"] = when
+        filters: dict[str, Any] = {"ordering": "-datetime_start"}
+        if date_from is not None:
+            filters["datetime_start_gte"] = datetime.combine(date_from, time.min)
+        if date_to is not None:
+            filters["datetime_start_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
         if routine_id is not None:
             filters["routine"] = as_int(routine_id, "routine_id")
         if impression is not None:
@@ -95,37 +97,35 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     async def log_workout_session(
         routine_id: str | None = None,
         day_id: str | None = None,
-        when: date | None = None,
+        started_at: date | datetime | None = None,
+        ended_at: date | datetime | None = None,
         notes: str | None = None,
         impression: str | None = None,
-        time_start: Annotated[str | None, Field(pattern=_TIME_PATTERN)] = None,
-        time_end: Annotated[str | None, Field(pattern=_TIME_PATTERN)] = None,
     ) -> dict[str, Any]:
-        """Record a workout session: the date, how it went, and what to
-        remember about it. Defaults to today.
+        """Record a workout session: when it ran, how it went, and what to
+        remember about it. Defaults to starting now.
 
         impression is 'bad', 'neutral' or 'good' — the trainee's own verdict on
         the session, which no aggregate over the logs can reconstruct. notes
         holds the rest of it (sleep, a tweaked shoulder, a gym that was full).
 
-        time_start and time_end are 'HH:MM' or 'HH:MM:SS' and belong together:
-        wger treats a session with only one of them as invalid, so pass both or
-        neither.
-
-        wger allows one session per routine per date. Logging a second one for
-        the same day is refused; patch the existing session instead
-        (list_workout_sessions with `when` finds it).
+        started_at and ended_at are full timestamps, so a session may run past
+        midnight; a bare date lands at 12:00. Leaving ended_at out keeps the
+        session open, which is what an assistant should do while the workout is
+        still going — patch it when the trainee is done. wger caps how long a
+        session may last (5 hours by default) and refuses one that ends before
+        it starts.
         """
-        if (time_start is None) != (time_end is None):
-            return bad_request("time_start and time_end must be given together")
+        start, end = at_noon(started_at), at_noon(ended_at)
+        if start is not None and end is not None and end < start:
+            return bad_request("ended_at is before started_at")
         body = api_models.WorkoutSessionRequest(
             routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
             day=opt(as_int(day_id, "day_id") if day_id is not None else None),
-            date=opt(when or date.today()),
+            datetime_start=opt(start),
+            datetime_end=opt(end),
             notes=opt(notes),
             impression=opt(as_impression(impression)),
-            time_start=opt(time_start),
-            time_end=opt(time_end),
         )
         created = await workoutsession_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -136,27 +136,28 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         session_id: str,
         routine_id: str | None = None,
         day_id: str | None = None,
-        when: date | None = None,
+        started_at: date | datetime | None = None,
+        ended_at: date | datetime | None = None,
         notes: str | None = None,
         impression: str | None = None,
-        time_start: Annotated[str | None, Field(pattern=_TIME_PATTERN)] = None,
-        time_end: Annotated[str | None, Field(pattern=_TIME_PATTERN)] = None,
     ) -> dict[str, Any]:
         """Patch a workout session. Only provided fields are sent.
 
-        Unlike log_workout_session, one time may be sent on its own here: the
-        session it lands on may already carry the other half. See
+        Sending ended_at on its own is how an open session is closed; the start
+        it is checked against is the one already stored. See
         log_workout_session for the fields themselves.
         """
         session = as_uuid(session_id, "session_id")
+        start, end = at_noon(started_at), at_noon(ended_at)
+        if start is not None and end is not None and end < start:
+            return bad_request("ended_at is before started_at")
         body = api_models.PatchedWorkoutSessionRequest(
             routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
             day=opt(as_int(day_id, "day_id") if day_id is not None else None),
-            date=opt(when),
+            datetime_start=opt(start),
+            datetime_end=opt(end),
             notes=opt(notes),
             impression=opt(as_impression(impression)),
-            time_start=opt(time_start),
-            time_end=opt(time_end),
         )
         require_fields(body)
         updated = await workoutsession_partial_update.asyncio(id=session, client=api, body=body)

@@ -7,7 +7,7 @@ there; what was missing was any way to read or write its own fields.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, time
 from typing import Any
 from uuid import UUID
 
@@ -70,11 +70,13 @@ def _creator(monkeypatch: pytest.MonkeyPatch) -> _Capture:
 
 
 @pytest.mark.asyncio
-async def test_session_defaults_to_today(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_session_start_is_left_to_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """wger defaults datetime_start to now; sending our own clock would only
+    disagree with it across a timezone."""
     mcp = _register()
     create = _creator(monkeypatch)
     await mcp.call_tool("log_workout_session", {})
-    assert create.body.date == date.today()
+    assert create.body.to_dict() == {}
 
 
 @pytest.mark.asyncio
@@ -107,28 +109,53 @@ async def test_session_carries_notes_and_its_plan(monkeypatch: pytest.MonkeyPatc
         {
             "routine_id": "1",
             "day_id": "5",
-            "when": "2026-08-18",
+            "started_at": "2026-08-18T18:00:00",
+            "ended_at": "2026-08-18T19:15:00",
             "notes": "Shoulder tweaked on the last set",
             "impression": "bad",
-            "time_start": "18:00",
-            "time_end": "19:15",
         },
     )
     body = create.body
     assert (body.routine, body.day) == (1, 5)
-    assert body.date == date(2026, 8, 18)
+    assert body.datetime_start == datetime(2026, 8, 18, 18, 0)
+    assert body.datetime_end == datetime(2026, 8, 18, 19, 15)
     assert body.notes == "Shoulder tweaked on the last set"
-    assert (body.time_start, body.time_end) == ("18:00", "19:15")
 
 
 @pytest.mark.asyncio
-async def test_half_a_time_range_is_refused_up_front(monkeypatch: pytest.MonkeyPatch) -> None:
-    """wger treats a session with only one of the two as invalid."""
+async def test_an_open_session_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A session without an end is one that is still running — 2.7 models that
+    deliberately, where the old date+time triple treated it as invalid."""
     mcp = _register()
     create = _creator(monkeypatch)
-    out = _result(await mcp.call_tool("log_workout_session", {"time_start": "18:00"}))
+    await mcp.call_tool("log_workout_session", {"started_at": "2026-08-18T18:00:00"})
+    body = create.body
+    assert body.datetime_start == datetime(2026, 8, 18, 18, 0)
+    assert "datetime_end" not in body.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_an_end_before_the_start_is_refused_up_front(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mcp = _register()
+    create = _creator(monkeypatch)
+    out = _result(
+        await mcp.call_tool(
+            "log_workout_session",
+            {"started_at": "2026-08-18T19:00:00", "ended_at": "2026-08-18T18:00:00"},
+        )
+    )
     assert not create.calls
-    assert "time_end" in json.dumps(out)
+    assert "before" in json.dumps(out)
+
+
+@pytest.mark.asyncio
+async def test_a_bare_date_lands_at_noon(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register()
+    create = _creator(monkeypatch)
+    await mcp.call_tool("log_workout_session", {"started_at": "2026-08-18"})
+    assert create.body.datetime_start == datetime.combine(date(2026, 8, 18), time(12, 0))
 
 
 # ---------- reading ----------
@@ -143,11 +170,19 @@ async def test_listing_is_newest_first_and_filters_by_day(
     mcp = _register()
     await mcp.call_tool(
         "list_workout_sessions",
-        {"when": "2026-08-18", "routine_id": "1", "impression": "good"},
+        {
+            "date_from": "2026-08-18",
+            "date_to": "2026-08-18",
+            "routine_id": "1",
+            "impression": "good",
+        },
     )
     call = listing.calls[-1]
-    assert call["ordering"] == "-date"
-    assert call["date"] == date(2026, 8, 18)
+    assert call["ordering"] == "-datetime_start"
+    # the upper bound is midnight *after* the last day, or everything logged on
+    # it would be dropped
+    assert call["datetime_start_gte"] == datetime(2026, 8, 18, 0, 0)
+    assert call["datetime_start_lt"] == datetime(2026, 8, 19, 0, 0)
     assert call["routine"] == 1
     assert call["impression"] == "3"
 
@@ -174,14 +209,17 @@ async def test_patch_sends_only_what_was_given(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_patch_completes_a_half_open_time_range(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The stored session may already carry the other half, so one time alone
-    is legitimate here even though it is not on create."""
+async def test_patch_closes_an_open_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sending only the end is how a running session is finished; the start it
+    is checked against is the one already stored."""
     patch = _Capture(SESSION)
     monkeypatch.setattr(workout_sessions.workoutsession_partial_update, "asyncio", patch)
     mcp = _register()
-    await mcp.call_tool("update_workout_session", {"session_id": SESSION_ID, "time_end": "19:30"})
-    assert patch.body.to_dict() == {"time_end": "19:30"}
+    await mcp.call_tool(
+        "update_workout_session",
+        {"session_id": SESSION_ID, "ended_at": "2026-08-18T19:30:00"},
+    )
+    assert patch.body.to_dict() == {"datetime_end": "2026-08-18T19:30:00"}
 
 
 @pytest.mark.asyncio
