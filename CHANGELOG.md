@@ -11,6 +11,28 @@ The 2.7 API renamed and retyped fields this server
 writes to, so a single build cannot serve both releases. See below for what
 changed at the tool boundary.
 
+* The server reads wger's version once at startup and warns when it is older
+  than the API client expects, naming both. A warning rather than a refusal:
+  most of the surface does not care which release it talks to — the exercise and
+  ingredient catalogs have been stable for years — so an operator who mostly
+  wants those is better served by a server that starts. What breaks breaks
+  visibly. The expected version is not written down: it is the major and minor
+  of the installed `wger-api-client`,
+  whose own README states the rule — `2.6.x` targets a 2.6 server, the patch
+  component belongs to the package. So the two cannot drift, and upgrading the
+  client raises the floor with it. wger's own clients already do this — the app
+  pins a `MIN_SERVER_VERSION` and the sync command compares before it starts —
+  and this server was the one client that did not.
+* **Fixed:** `log_body_weight` verifies that the category it resolved really is
+  the body-weight one. Against a wger without the `metric_type` filter the
+  request came back with every category the user has, and the first was taken —
+  which would have filed body weights under a waist measurement with no error
+  anywhere. The one way this could have quietly corrupted someone's records. Against 2.6 the failure was otherwise unreadable: a TypeError
+  from inside the generated client on a session write, a valid weight id
+  refused as malformed, a date filter dropped without a word. A wger that is
+  unreachable or reports an unparseable version is logged and allowed through,
+  since whether it happens to be up at boot says nothing about compatibility.
+  A pre-release counts as its release, so 2.7.0a2 is accepted.
 * **Breaking (arguments and results):** the body-weight tools go through
   `/api/v2/measurement/` instead of the `/weightentry/` shim, which is what lets
   the unit travel with the reading. `log_body_weight` and

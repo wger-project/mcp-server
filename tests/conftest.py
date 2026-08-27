@@ -73,6 +73,22 @@ def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WGER_BASE_URL", "https://wger.test")
 
 
+@pytest.fixture(autouse=True)
+def _skip_version_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the wger version probe out of every test that boots the app.
+
+    build_app() checks its upstream on startup, so without this each TestClient
+    would make a real request — which respx refuses as unmocked and which would
+    make the suite depend on the network besides. The probe itself is covered in
+    test_compat.py, including that the boot is still wired to it.
+    """
+
+    async def _noop(settings: Any) -> None:
+        return None
+
+    monkeypatch.setattr("wger_mcp.server.check_wger_version", _noop)
+
+
 @pytest.fixture
 def rsa_key() -> RSAKey:
     return RSAKey.generate_key(2048, parameters={"kid": "test-1", "use": "sig"})

@@ -9,7 +9,7 @@ It talks to a wger instance over its public REST API — it is a separate servic
 
 - **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** (FastMCP) for a shared deployment. Pick with `--transport`.
 - **Auth:** **multi-user via OIDC SSO** — any OIDC IdP (Keycloak, Authentik, Auth0, Okta, …). Every request acts as the calling user's own wger account. For single-user self-hosting without an IdP, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
-- **Requires:** wger >= 2.7, Python >= 3.11.
+- **Requires:** wger >= 2.7, Python >= 3.11. The server reads wger's version once at startup and warns if it is older than the API client expects (the major and minor of the installed `wger-api-client`), naming both. It warns rather than refuses: the exercise and ingredient catalogs are stable across releases and keep working, while the tools built on newer endpoints fail visibly when called.
 
 ## How auth works
 

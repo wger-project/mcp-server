@@ -32,6 +32,12 @@ dependencies = [
     # mcp's own floor.
     "anyio>=4.5",
     "httpx>=0.27",
+    # compat.py compares the wger version it finds against the one these
+    # tools need. Declared rather than borrowed from the many dependencies
+    # that already pull it, and preferred over a hand-rolled parse: wger
+    # itself compares with packaging, and a version string is exactly the
+    # kind of input where a five-line parser grows edge cases.
+    "packaging>=23",
     "pydantic-settings>=2.4",
     # Also imported directly, by config.py and every tool module (Field,
     # validators, HttpUrl) — not just borrowed from pydantic-settings. >=2.7
