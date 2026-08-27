@@ -75,7 +75,7 @@ async def test_patch_sends_the_id_as_a_uuid(monkeypatch: pytest.MonkeyPatch) -> 
     patch = _Capture(ENTRY)
     monkeypatch.setattr(body_weight.weightentry_partial_update, "asyncio", patch)
     mcp = _register()
-    await mcp.call_tool("update_body_weight_entry", {"entry_id": ENTRY_ID, "weight_kg": 79.5})
+    await mcp.call_tool("update_body_weight_entry", {"entry_id": ENTRY_ID, "weight": 79.5})
     assert patch.calls[-1]["id"] == UUID(ENTRY_ID)
 
 
@@ -108,7 +108,7 @@ async def test_a_bare_date_lands_at_noon(monkeypatch: pytest.MonkeyPatch) -> Non
     create = _Capture(ENTRY)
     monkeypatch.setattr(body_weight.weightentry_create, "asyncio", create)
     mcp = _register()
-    await mcp.call_tool("log_body_weight", {"weight_kg": 80, "when": "2026-08-18"})
+    await mcp.call_tool("log_body_weight", {"weight": 80, "when": "2026-08-18"})
     assert create.body.date == datetime(2026, 8, 18, 12, 0)
     assert create.body.weight == "80"
 
