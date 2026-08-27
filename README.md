@@ -302,20 +302,20 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 
 | Tool | Description |
 |------|-------------|
-| `log_body_weight(weight_kg, when?)` | Body-weight entry |
-| `get_body_weight_history(limit?)` | Recent weight entries |
-| `update_body_weight_entry(entry_id, ...)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry |
+| `log_body_weight(weight, when?)` | Body-weight entry. `weight` is read in the weight unit of the wger profile — kg for most, lb for some — since the endpoint takes no unit of its own; `whoami` reports which under `weight_unit` |
+| `get_body_weight_history(limit?)` | Recent weight entries, in the profile's weight unit |
+| `update_body_weight_entry(entry_id, weight?, when?)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry. A patch restamps the entry with the profile unit of the moment |
 
 ### Body measurements
 
-Anything tracked with a tape measure. Categories are the user's own (Waist, Chest, Bicep, …), each with its unit, and entries hang off them.
+Categories, each with its unit, and the entries that hang off them. Since wger 2.7 a category carries a `metric_type` saying what it holds: the free-form ones a trainee invents (Waist, Chest, Bicep, … all `custom`) sit alongside typed ones for body weight, body fat, height, heart rate, blood pressure, sleep, steps and the rest. Three kinds do not take entries directly — the group containers (`blood_pressure`, `sleep`), whose readings belong in their component children, and the calculated ones (`dynamic_type` other than `NONE`, e.g. BMI), which the server maintains.
 
 | Tool | Description |
 |------|-------------|
-| `list_measurement_categories(limit?)` / `get_measurement_category(category_id)` | Read categories |
-| `create_measurement_category(name, unit?)` | Add a category (e.g. `name='Bicep'`, `unit='cm'`) |
+| `list_measurement_categories(metric_type?, limit?)` / `get_measurement_category(category_id)` | Read categories. `metric_type` goes straight to one (`body_weight`, `body_fat`, `steps`, `sleep_rem`, …) instead of paging the list to find it |
+| `create_measurement_category(name, unit?)` | Add a free-form (`custom`) category, e.g. `name='Bicep'`, `unit='cm'` |
 | `update_measurement_category(category_id, name?, unit?)` / `delete_measurement_category(category_id)` | Rename / re-unit a category, or delete it with all its entries |
-| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00 |
+| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00. The range a value may be in follows the category's `metric_type` (20-350 kg for a body weight, 0-100000 for a step count), and wger's refusal names it |
 | `list_measurements(category_id?, date_from?, date_to?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category and date range (both inclusive) |
 | `update_measurement(measurement_id, value?, when?, notes?, category_id?)` / `delete_measurement(measurement_id)` | Edit / remove an entry. `category_id` moves one filed under the wrong category |
 

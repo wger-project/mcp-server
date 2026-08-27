@@ -11,6 +11,11 @@ The 2.7 API renamed and retyped fields this server
 writes to, so a single build cannot serve both releases. See below for what
 changed at the tool boundary.
 
+* **Breaking (arguments):** `log_body_weight` and `update_body_weight_entry`
+  take `weight` instead of `weight_kg`. The name was wrong in both directions:
+  the endpoint has never taken a unit, it reads the value in the weight unit of
+  the trainee's wger profile, so `weight_kg=80` on an imperial profile stored
+  80 lb. The docstrings now say so, and name `whoami` as where to check.
 * **Breaking (arguments):** `log_workout_session` and `update_workout_session`
   take `started_at` / `ended_at` instead of `when` / `time_start` / `time_end`.
   wger 2.7 stores a session as two timestamps rather than a date plus two wall
@@ -31,6 +36,19 @@ changed at the tool boundary.
   unset, so editing the note on an entry imported from Apple Health or Health
   Connect would have claimed it as hand-entered — and an otherwise empty patch
   would have been sent instead of refused.
+* **Fixed:** measurement values are no longer bounded at 5000 by this server.
+  From 2.7 the range depends on the metric type of the category — 0 to 100000
+  for a step count, 0 to 1440 minutes for a sleep stage, 20 to 350 kg for a body
+  weight — so one number here fitted none of them and rejected a busy day's
+  steps before wger ever saw it. Only the column cap is checked now, and wger's
+  refusal names the actual range. `0` is accepted too: a rest day really is
+  0 steps, and the old bound required more than zero.
+* `list_measurement_categories` takes `metric_type`, and its description
+  explains the roles a category can have. The list is no longer just the
+  free-form categories a trainee invented: 2.7 adds the official body-weight
+  category, the blood-pressure and sleep group containers, their component
+  children, and the calculated ones. Three of those refuse entries or deletion,
+  which an assistant could previously only discover by being refused.
 * Sessions no longer claim that wger allows only one per routine per date. 2.7
   dropped that constraint, and repeating it steered assistants into patching an
   existing session when a second one was wanted.
