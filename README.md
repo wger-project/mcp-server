@@ -240,17 +240,17 @@ This matters most for agents driven by small local models, whose tool-selection 
 
 #### Profiles that cover most agents
 
-Measured, not estimated: the token figures are the serialised tool list divided by four.
+Measured, not estimated: the token figures are the serialised tool list divided by four. They include the output schemas the MCP SDK now emits for every tool, which is why they are around a quarter higher than in earlier releases — the tool descriptions themselves did not grow by that much.
 
 | Agent | `MCP_TOOLS` | Tools | ~Tokens |
 |------|-------------|------:|--------:|
-| Everything (default) | *(unset)* | 85 | 18.6k |
-| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 11.5k |
-| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 6.5k |
-| Food logging | `nutrition,off,exercises,profile` | 29 | 6.6k |
-| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 20 | 3.0k |
+| Everything (default) | *(unset)* | 88 | 23.2k |
+| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 13.0k |
+| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 7.3k |
+| Food logging | `nutrition,off,exercises,profile` | 29 | 7.4k |
+| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 23 | 5.7k |
 
-The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.3k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.2k) creates and changes it. An agent that follows a plan needs only the first, which is nearly a quarter of the whole surface saved. `routines` remains valid and still means both.
+The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.5k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.7k) creates and changes it. An agent that follows a plan needs only the first, which is a fifth of the whole surface saved. `routines` remains valid and still means both.
 
 ### Profile
 
@@ -313,11 +313,21 @@ Categories, each with its unit, and the entries that hang off them. Since wger 2
 | Tool | Description |
 |------|-------------|
 | `list_measurement_categories(metric_type?, limit?)` / `get_measurement_category(category_id)` | Read categories. `metric_type` goes straight to one (`body_weight`, `body_fat`, `steps`, `sleep_rem`, …) instead of paging the list to find it |
-| `create_measurement_category(name, unit?)` | Add a free-form (`custom`) category, e.g. `name='Bicep'`, `unit='cm'` |
+| `create_measurement_category(name, unit?, metric_type?)` | Add a category. Without `metric_type` it is free-form (`custom`), e.g. `name='Bicep'`, `unit='cm'`. With one it is typed (`body_fat`, `height`, `heart_rate`, `steps`, …), which is what lets wger chart it and a health sync write into it; the unit then defaults to the conventional one. One typed category per person, and the type cannot be changed afterwards |
 | `update_measurement_category(category_id, name?, unit?)` / `delete_measurement_category(category_id)` | Rename / re-unit a category, or delete it with all its entries |
 | `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00. The range a value may be in follows the category's `metric_type` (20-350 kg for a body weight, 0-100000 for a step count), and wger's refusal names it |
-| `list_measurements(category_id?, date_from?, date_to?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category and date range (both inclusive) |
+| `list_measurements(category_id?, date_from?, date_to?, source?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category, date range (both inclusive) and origin. `source` is `user` (hand-entered), `apple` / `google` (phone health sync) or `calculated` (maintained by wger, e.g. BMI) |
+| `summarize_measurements(category_id?, date_from?, date_to?, bucket?, max_points?, timezone_name?)` | Condense a series into per-period rows — count, sum, min, max per category, bucket and unit. `bucket` is `auto`, `hour`, `day`, `week` or `month`. A year of daily weigh-ins is 365 entries through `list_measurements` and twelve rows through this. Buckets follow the trainee's own calendar |
 | `update_measurement(measurement_id, value?, when?, notes?, category_id?)` / `delete_measurement(measurement_id)` | Edit / remove an entry. `category_id` moves one filed under the wrong category |
+
+#### Blood pressure
+
+A reading is two entries — systolic and diastolic — in two child categories of a `blood_pressure` group, paired by carrying the exact same timestamp. These two tools are what make that workable; doing it through `log_measurement` means finding both categories and matching timestamps by hand.
+
+| Tool | Description |
+|------|-------------|
+| `log_blood_pressure(systolic, diastolic, when?, notes?)` | Record one reading, writing both halves with one timestamp. Creates the category group the first time, so nothing has to be set up in advance. Refuses a pair passed the wrong way round |
+| `get_blood_pressure_history(date_from?, date_to?, limit?)` | Readings (newest first), each as one row with both numbers. A half missing its counterpart is reported with the other side null rather than dropped |
 
 ### Exercise catalog
 

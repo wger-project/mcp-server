@@ -36,6 +36,27 @@ changed at the tool boundary.
   unset, so editing the note on an entry imported from Apple Health or Health
   Connect would have claimed it as hand-entered — and an otherwise empty patch
   would have been sent instead of refused.
+* New tool `summarize_measurements`: the server condenses a series into
+  per-period rows (count, sum, min, max per category, bucket and unit) instead
+  of this server paging the entries and the caller trimming them. A year of
+  daily weigh-ins is 365 entries through `list_measurements` and twelve rows
+  through this. `bucket=auto` picks the finest period that keeps the series
+  under `max_points`; buckets are cut in the trainee's own calendar, which wger
+  2.7 knows from their profile.
+* New tools `log_blood_pressure` and `get_blood_pressure_history`. wger stores a
+  reading as two entries in two child categories of a `blood_pressure` group,
+  paired by carrying the identical timestamp — reachable through
+  `log_measurement` in principle, but only by finding both categories and
+  matching timestamps by hand, and a pair that drifts apart by a second stops
+  being one reading. Logging also builds the category group on first use, and
+  reading pairs the halves back into one row.
+* `create_measurement_category` takes `metric_type`, so an assistant can set up
+  the typed categories 2.7 introduced (body fat, height, heart rate, steps, …)
+  rather than only free-form ones. The unit defaults to the conventional one per
+  type. Creating a `blood_pressure` or `sleep` group also creates the child
+  categories its readings go into.
+* `list_measurements` takes `source`, separating what the trainee typed from
+  what a phone's health sync wrote and from what wger calculates itself.
 * **Fixed:** measurement values are no longer bounded at 5000 by this server.
   From 2.7 the range depends on the metric type of the category — 0 to 100000
   for a step count, 0 to 1440 minutes for a sleep stage, 20 to 350 kg for a body
