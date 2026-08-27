@@ -22,7 +22,7 @@ from .common import (
     api_list_tool,
     api_tool,
     as_decimal,
-    as_int,
+    as_uuid,
     at_noon,
     opt,
     require_fields,
@@ -61,7 +61,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         when: date | datetime | None = None,
     ) -> dict[str, Any]:
         """Patch a body-weight entry."""
-        entry = as_int(entry_id, "entry_id")
+        entry = as_uuid(entry_id, "entry_id")
         body = api_models.PatchedWeightEntryRequest(
             weight=opt(as_decimal(weight_kg) if weight_kg is not None else None),
             date=opt(at_noon(when)),
@@ -74,5 +74,5 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     @api_tool
     async def delete_body_weight_entry(entry_id: str) -> dict[str, Any]:
         """Delete a body-weight entry."""
-        await weightentry_destroy.asyncio_detailed(id=as_int(entry_id, "entry_id"), client=api)
+        await weightentry_destroy.asyncio_detailed(id=as_uuid(entry_id, "entry_id"), client=api)
         return {"deleted": True, "entry_id": entry_id}
