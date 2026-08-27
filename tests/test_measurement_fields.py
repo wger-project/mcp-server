@@ -24,7 +24,7 @@ CATEGORY_ID = "018f6f30-0000-7000-8000-000000000001"
 OTHER_CATEGORY_ID = "018f6f30-0000-7000-8000-000000000002"
 ENTRY_ID = "018f6f30-0000-7000-8000-000000000003"
 
-CATEGORY = api_models.Category(id=UUID(CATEGORY_ID), name="Waist", unit="cm")
+CATEGORY = api_models.Category(id=UUID(CATEGORY_ID), name="Waist", unit="cm", is_official=False)
 ENTRY = api_models.Measurement(
     id=UUID(ENTRY_ID),
     category=UUID(CATEGORY_ID),

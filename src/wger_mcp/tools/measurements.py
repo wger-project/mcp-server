@@ -24,6 +24,7 @@ from wger_api_client.api.measurement_category import (
     measurement_category_retrieve,
 )
 from wger_api_client.client import AuthenticatedClient
+from wger_api_client.types import UNSET
 
 from ..api_client import paginate
 from ..config import Settings
@@ -132,6 +133,10 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             value=value,
             date=opt(at_noon(when)),
             notes=opt(notes),
+            # The generated model defaults this to 'user' rather than leaving it
+            # out, so it has to be unset explicitly. See update_measurement for
+            # why sending it would be worse than pointless.
+            source=UNSET,
         )
         created = await measurement_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -166,6 +171,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             date=opt(at_noon(when)),
             notes=opt(notes),
             category=opt(as_uuid(category_id, "category_id") if category_id is not None else None),
+            # Never send the source on a patch: it would restamp a health-synced
+            # entry as hand-entered and lose the provenance the importer wrote,
+            # and it would make every patch non-empty, walking straight past
+            # require_fields below. wger 2.7 stopped putting a default on this
+            # field in the PATCH schema, so the generated model no longer fills
+            # it in — this keeps us correct against the builds that still do.
+            source=UNSET,
         )
         require_fields(body)
         updated = await measurement_partial_update.asyncio(id=entry, client=api, body=body)
