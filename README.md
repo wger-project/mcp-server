@@ -244,11 +244,11 @@ Measured, not estimated: the token figures are the serialised tool list divided 
 
 | Agent | `MCP_TOOLS` | Tools | ~Tokens |
 |------|-------------|------:|--------:|
-| Everything (default) | *(unset)* | 88 | 23.2k |
+| Everything (default) | *(unset)* | 88 | 23.5k |
 | Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 13.0k |
 | Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 7.3k |
 | Food logging | `nutrition,off,exercises,profile` | 29 | 7.4k |
-| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 23 | 5.7k |
+| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 23 | 6.0k |
 
 The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.5k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.7k) creates and changes it. An agent that follows a plan needs only the first, which is a fifth of the whole surface saved. `routines` remains valid and still means both.
 
@@ -300,11 +300,15 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 
 ### Body weight
 
+Since wger 2.7 a body weight is a measurement like any other, in an official `body_weight` category every account has from registration. These tools go through `/api/v2/measurement/` rather than the older `/weightentry/` shim, which is what lets the **unit travel with the reading**: the shim reads and writes in whatever the profile says at that moment, so switching a profile from kg to lb reinterprets everything written before it.
+
 | Tool | Description |
 |------|-------------|
-| `log_body_weight(weight, when?)` | Body-weight entry. `weight` is read in the weight unit of the wger profile — kg for most, lb for some — since the endpoint takes no unit of its own; `whoami` reports which under `weight_unit` |
-| `get_body_weight_history(limit?)` | Recent weight entries, in the profile's weight unit |
-| `update_body_weight_entry(entry_id, weight?, when?)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry. A patch restamps the entry with the profile unit of the moment |
+| `log_body_weight(weight, when?, unit?, notes?)` | Body-weight entry. `unit` is `kg` or `lb` and is recorded with the reading; left out it is the profile's weight unit, so passing it is both more precise and one request cheaper |
+| `get_body_weight_history(date_from?, date_to?, limit?)` | Recent entries, each with the reading as recorded (`weight` + `unit`) and the same number in kilograms (`weight_kg`) — a history can genuinely mix units |
+| `update_body_weight_entry(entry_id, weight?, when?, unit?, notes?)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry. Correcting a value keeps the unit it was recorded in; pass `unit` only to restate it, which preserves any provenance a health import left on the entry |
+
+For a trend rather than the entries, `summarize_measurements` works over this category like any other.
 
 ### Body measurements
 

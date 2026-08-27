@@ -11,11 +11,27 @@ The 2.7 API renamed and retyped fields this server
 writes to, so a single build cannot serve both releases. See below for what
 changed at the tool boundary.
 
-* **Breaking (arguments):** `log_body_weight` and `update_body_weight_entry`
-  take `weight` instead of `weight_kg`. The name was wrong in both directions:
-  the endpoint has never taken a unit, it reads the value in the weight unit of
-  the trainee's wger profile, so `weight_kg=80` on an imperial profile stored
-  80 lb. The docstrings now say so, and name `whoami` as where to check.
+* **Breaking (arguments and results):** the body-weight tools go through
+  `/api/v2/measurement/` instead of the `/weightentry/` shim, which is what lets
+  the unit travel with the reading. `log_body_weight` and
+  `update_body_weight_entry` take `weight` (not `weight_kg`) plus an optional
+  `unit` of `kg` or `lb`, recorded on the entry itself; omitted, it is the
+  profile's weight unit, so passing it explicitly is also one request cheaper.
+  `get_body_weight_history` returns each entry as recorded (`weight` + `unit`)
+  alongside the same number in kilograms (`weight_kg`), and takes `date_from` /
+  `date_to`; both tools also reach the `notes` field, which the shim had no room
+  for.
+
+  The old name was wrong in both directions: the shim never took a unit, it read
+  the value in whatever the profile said at that moment, so `weight_kg=80` on an
+  imperial profile stored 80 lb — and a later profile switch reinterpreted every
+  earlier entry. Correcting a value now keeps the unit it was recorded in rather
+  than restamping it, and restating a unit preserves the provenance a health
+  import left on the entry instead of replacing `extra_data` wholesale.
+
+  Entry ids are UUIDs, as they already were through the shim — the `WeightEntry`
+  table was merged into body-weight measurements and its integer ids went with
+  it, so an id held from before wger 2.7 no longer resolves.
 * **Breaking (arguments):** `log_workout_session` and `update_workout_session`
   take `started_at` / `ended_at` instead of `when` / `time_start` / `time_end`.
   wger 2.7 stores a session as two timestamps rather than a date plus two wall
@@ -27,10 +43,6 @@ changed at the tool boundary.
   `date_to` instead of `when`. 2.7 can filter sessions over a range, so the
   single-day restriction the old argument existed for is gone; pass the same day
   twice for one day. The range is cut on the day a session *started*.
-* **Fixed:** `update_body_weight_entry` and `delete_body_weight_entry` accept
-  the UUID that wger 2.7 identifies a weight entry by. The `WeightEntry` table
-  was merged into body-weight measurements and the endpoint's integer ids went
-  with it, so both tools rejected every valid id.
 * **Fixed:** patching a measurement no longer rewrites its `source`. The
   generated client fills that field in with `user` unless it is explicitly
   unset, so editing the note on an entry imported from Apple Health or Health
