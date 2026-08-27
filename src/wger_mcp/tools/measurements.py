@@ -252,7 +252,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         name: Annotated[str | None, Field(max_length=CATEGORY_NAME_MAX)] = None,
         unit: Annotated[str | None, Field(max_length=CATEGORY_UNIT_MAX)] = None,
     ) -> dict[str, Any]:
-        """Rename or change the unit of a measurement category."""
+        """Rename or change the unit of a measurement category.
+
+        A category's metric_type is fixed once it exists, so an untyped one
+        cannot be turned into a body-weight or heart-rate category later —
+        create_measurement_category is the only place a type is set. A
+        body-weight category also takes no unit other than kg or lb.
+        """
         category = as_uuid(category_id, "category_id")
         body = api_models.PatchedCategoryRequest(name=opt(name), unit=opt(unit))
         require_fields(body)
