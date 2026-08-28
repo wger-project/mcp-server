@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 from wger_api_client import models as api_models
@@ -12,7 +14,7 @@ from wger_api_client.types import UNSET
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings
-from wger_mcp.tools import routines, workout_logs
+from wger_mcp.tools import common, routines, workout_logs
 
 LOG_ID = "018f6f30-0000-7000-8000-000000000003"
 
@@ -60,6 +62,15 @@ class _Capture:
         return self.calls[-1]["body"]
 
 
+def _profile(monkeypatch: pytest.MonkeyPatch, unit: str) -> None:
+    """Stand in for /userprofile/, which decides the unit when none is passed."""
+
+    async def _retrieve(**kwargs: Any) -> Any:
+        return SimpleNamespace(weight_unit=unit)
+
+    monkeypatch.setattr(common.userprofile_retrieve, "asyncio", _retrieve)
+
+
 def _result(raw: Any) -> Any:
     return raw[1] if isinstance(raw, tuple) else raw
 
@@ -83,10 +94,53 @@ async def test_pounds_are_stored_as_pounds(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_kilograms_remain_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_omitted_unit_follows_a_kilogram_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = _register(workout_logs)
     create = _Capture(LOG)
     monkeypatch.setattr(workout_logs.workoutlog_create, "asyncio", create)
+    _profile(monkeypatch, "kg")
+    await mcp.call_tool("log_set", {"exercise_id": "73", "reps": 5, "weight": 61.23})
+    assert create.body.weight_unit == 1
+
+
+@pytest.mark.asyncio
+async def test_omitted_unit_follows_a_pound_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trainee whose profile says pounds reports pounds; 225 must not become 225 kg."""
+    mcp = _register(workout_logs)
+    create = _Capture(LOG)
+    monkeypatch.setattr(workout_logs.workoutlog_create, "asyncio", create)
+    _profile(monkeypatch, "lb")
+    await mcp.call_tool("log_set", {"exercise_id": "73", "reps": 5, "weight": 225})
+    assert create.body.weight == "225"
+    assert create.body.weight_unit == 2
+
+
+@pytest.mark.asyncio
+async def test_explicit_unit_beats_the_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register(workout_logs)
+    create = _Capture(LOG)
+    monkeypatch.setattr(workout_logs.workoutlog_create, "asyncio", create)
+    _profile(monkeypatch, "lb")
+    await mcp.call_tool(
+        "log_set",
+        {"exercise_id": "73", "reps": 5, "weight": 100, "weight_unit": "kg"},
+    )
+    assert create.body.weight_unit == 1
+
+
+@pytest.mark.asyncio
+async def test_unreadable_profile_falls_back_to_kilograms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable profile must not fail the write; wger's own default stands."""
+    mcp = _register(workout_logs)
+    create = _Capture(LOG)
+    monkeypatch.setattr(workout_logs.workoutlog_create, "asyncio", create)
+
+    async def _boom(**kwargs: Any) -> Any:
+        raise httpx.ConnectError("profile unreachable")
+
+    monkeypatch.setattr(common.userprofile_retrieve, "asyncio", _boom)
     await mcp.call_tool("log_set", {"exercise_id": "73", "reps": 5, "weight": 61.23})
     assert create.body.weight_unit == 1
 

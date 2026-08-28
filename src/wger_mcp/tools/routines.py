@@ -124,6 +124,7 @@ from .common import (
     bad_request,
     language_id_resolver,
     opt,
+    profile_weight_unit_resolver,
     require_fields,
     weight_unit_name,
 )
@@ -522,6 +523,8 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
 
 def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
     """Authoring the plan: creating, changing and deleting its parts."""
+
+    _profile_weight_unit = profile_weight_unit_resolver(api)
 
     @mcp.tool()
     @api_tool
@@ -952,7 +955,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         reps: Annotated[int, Field(ge=1, le=1000)],
         weight: Annotated[float | None, Field(ge=0, le=2000)] = None,
         slot_order: Annotated[int, Field(ge=1, le=100)] = 1,
-        weight_unit: str = "kg",
+        weight_unit: str | None = None,
         rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
         entry_type: str = "normal",
     ) -> dict[str, Any]:
@@ -965,6 +968,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         which is the honest thing to do before the trainee's working weights are
         known. weight_unit is 'kg' or 'lb' and is recorded on the entry, so the
         number is stored in the unit it was given in rather than converted.
+        Omitting weight_unit takes the trainee's own unit from their wger
+        profile, so a profile set to pounds does not silently record kilograms.
 
         rir sets a Reps-In-Reserve target for the set, wger's autoregulation
         field: 2 means "stop with two good reps left".
@@ -979,7 +984,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         # Parsed up front: the slot must not be created if a later id is bad
         day = as_int(day_id, "day_id")
         exercise = as_int(exercise_id, "exercise_id")
-        unit = as_weight_unit(weight_unit)
+        unit = as_weight_unit(
+            weight_unit if weight_unit is not None else await _profile_weight_unit()
+        )
         planned: list[tuple[str, float]] = [("sets", sets), ("reps", reps)]
         if weight is not None:
             planned.append(("weight", weight))
