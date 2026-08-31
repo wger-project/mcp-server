@@ -87,12 +87,23 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         left. It is how wger tracks set effort. rest is the pause after the set,
         in seconds.
 
+        exercise_id is the movement ACTUALLY PERFORMED, which is not always the
+        one the plan names. When a machine is occupied or a gym lacks the
+        equipment, pass the substitute's own exercise_id and still point
+        routine_id, slot_entry_id and iteration at the planned slot: the set
+        stays attached to the plan and the history stays true to what was
+        lifted. Reusing the slot's planned exercise_id for a substitute files a
+        rope pushdown as a machine pushdown, and no later reading of the log can
+        tell the two apart. search_exercises finds the substitute's id.
+
         routine_id, slot_entry_id and iteration attach the set to the plan it
-        was performed from; get all three from get_workout_for_date. Without
-        them the set is still logged and still counts towards the exercise's
-        history, but it is freestanding work: wger reads a routine's log view
-        and its statistics through the routine link, so an unattached set is
-        invisible there and in the apps that show a plan's progress.
+        was performed from; get those three from get_workout_for_date, but read
+        exercise_id off the movement performed, not off the planned entry they
+        came from. Without them the set is still logged and still counts towards
+        the exercise's history, but it is freestanding work: wger reads a
+        routine's log view and its statistics through the routine link, so an
+        unattached set is invisible there and in the apps that show a plan's
+        progress.
 
         The *_target fields record what was prescribed next to what was done, in
         the same row: reps_target, weight_target, rir_target, rest_target.
