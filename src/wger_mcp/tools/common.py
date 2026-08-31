@@ -98,10 +98,14 @@ def as_decimal(value: float) -> str:
     return f"{value:g}"
 
 
-def as_weight_unit(unit: str | None) -> int | None:
-    """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``."""
-    if unit is None:
-        return None
+def as_weight_unit(unit: int | str | None) -> int | None:
+    """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``.
+
+    A numeric id passes through unchanged, so a caller that already holds
+    wger's own value is not forced to convert it back into a name.
+    """
+    if unit is None or isinstance(unit, int):
+        return unit
     try:
         return WEIGHT_UNITS[unit]
     except KeyError:
@@ -110,10 +114,14 @@ def as_weight_unit(unit: str | None) -> int | None:
         ) from None
 
 
-def as_repetition_unit(unit: str | None) -> int | None:
-    """Look up wger's id for a repetition unit. ``None`` stays ``None``."""
-    if unit is None:
-        return None
+def as_repetition_unit(unit: int | str | None) -> int | None:
+    """Look up wger's id for a repetition unit. ``None`` stays ``None``.
+
+    A numeric id passes through unchanged, so a caller that already holds
+    wger's own value is not forced to convert it back into a name.
+    """
+    if unit is None or isinstance(unit, int):
+        return unit
     try:
         return REPETITION_UNITS[unit]
     except KeyError:

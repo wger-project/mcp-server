@@ -5,6 +5,16 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* `attach_exercise_to_slot` and `update_slot_entry` accept a unit NAME for
+  `repetition_unit` and `weight_unit` — 'seconds', 'minutes', 'until_failure',
+  'kg', 'lb' and the rest — as well as wger's numeric id. Before, these were the
+  only unit fields in the server that took a bare integer with no mapping, so a
+  caller had to know that seconds is 3; `log_set` has always taken names. A
+  wrong id is invisible afterwards: a 30-second hold written with id 2 is stored
+  as "30 until failure", and nothing in the record says it was meant to be time.
+  Numeric ids still pass through unchanged, and an unknown name is refused
+  before the write instead of reaching wger.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always

@@ -120,6 +120,7 @@ from .common import (
     api_tool,
     as_decimal,
     as_int,
+    as_repetition_unit,
     as_weight_unit,
     bad_request,
     language_id_resolver,
@@ -703,8 +704,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         exercise_id: str | None = None,
         order: Annotated[int | None, Field(ge=1, le=100)] = None,
         comment: str | None = None,
-        repetition_unit: int | None = None,
-        weight_unit: int | None = None,
+        repetition_unit: int | str | None = None,
+        weight_unit: int | str | None = None,
         slot_id: str | None = None,
         entry_type: str | None = None,
         repetition_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
@@ -712,8 +713,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
     ) -> dict[str, Any]:
         """Patch a slot entry (the exercise binding).
 
-        See attach_exercise_to_slot for entry_type and the rounding fields.
-        slot_id moves the entry to another slot.
+        See attach_exercise_to_slot for entry_type, the unit fields and the
+        rounding fields. slot_id moves the entry to another slot.
         """
         if entry_type is not None and entry_type not in EXERCISE_TYPE_ENUM_VALUES:
             return bad_request(
@@ -723,8 +724,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             exercise=(as_int(exercise_id, "exercise_id") if exercise_id is not None else UNSET),
             order=opt(order),
             comment=opt(comment),
-            repetition_unit=opt(repetition_unit),
-            weight_unit=opt(weight_unit),
+            repetition_unit=opt(as_repetition_unit(repetition_unit)),
+            weight_unit=opt(as_weight_unit(weight_unit)),
             slot=opt(as_int(slot_id, "slot_id") if slot_id is not None else None),
             type_=opt(entry_type),
             repetition_rounding=opt(
@@ -827,8 +828,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         slot_id: str,
         exercise_id: str,
         order: Annotated[int, Field(ge=1, le=100)] = 1,
-        repetition_unit: int | None = None,
-        weight_unit: int | None = None,
+        repetition_unit: int | str | None = None,
+        weight_unit: int | str | None = None,
         comment: str = "",
         entry_type: str = "normal",
         repetition_rounding: Annotated[float | None, Field(gt=0, le=100)] = None,
@@ -842,6 +843,13 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         partial, forced, tut (time under tension), iso (isometric hold) or jump.
         Warmup sets in particular need it — left at 'normal' they count as
         working sets in every later reading of the plan.
+
+        repetition_unit says what `reps` counts and weight_unit what a load is
+        measured in. Both take a name — 'seconds', 'minutes', 'meters',
+        'until_failure', 'repetitions', or 'kg' / 'lb' — or wger's numeric id if
+        you already hold one. Prefer the name: a timed hold written with the
+        wrong id is stored as a rep count, and no later reading of the plan can
+        tell it was meant to be seconds.
 
         repetition_rounding / weight_rounding round what a progression computes
         to something loadable: 2.5 for a gym whose smallest pair of plates makes
@@ -857,8 +865,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             exercise=as_int(exercise_id, "exercise_id"),
             order=order,
             comment=comment,
-            repetition_unit=opt(repetition_unit),
-            weight_unit=opt(weight_unit),
+            repetition_unit=opt(as_repetition_unit(repetition_unit)),
+            weight_unit=opt(as_weight_unit(weight_unit)),
             type_=entry_type,
             repetition_rounding=opt(
                 as_decimal(repetition_rounding) if repetition_rounding is not None else None
