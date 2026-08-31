@@ -78,8 +78,9 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         a trainee who works in pounds gets pounds back out, with no rounding
         drift from converting twice.
 
-        reps_unit says what `reps` counts: repetitions (wger's default),
-        seconds, minutes, meters, kilometers, miles, until_failure or max_reps.
+        reps_unit says what `reps` counts. Pass the NAME, never a number, and
+        do not infer an id from the order of this list: repetitions,
+        until_failure, seconds, minutes, miles, kilometers, max_reps, meters.
         A plank logged without it is stored as 60 repetitions rather than 60
         seconds, which no later reading of the log can undo.
 

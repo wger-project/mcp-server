@@ -14,6 +14,11 @@ notes. This file records important changes to *this package*.
   as "30 until failure", and nothing in the record says it was meant to be time.
   Numeric ids still pass through unchanged, and an unknown name is refused
   before the write instead of reaching wger.
+* The unit list in `log_set`'s docstring is reordered to match wger's actual
+  ids and now says to pass the name rather than infer a number from the list's
+  order. As written before, it listed seconds second while seconds is id 3 and
+  `until_failure` is id 2, so a reader counting positions arrived at exactly the
+  wrong value.
 
 ## 0.2.0
 

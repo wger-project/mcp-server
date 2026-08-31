@@ -30,9 +30,11 @@ WEIGHT_UNITS: dict[str, int] = {"kg": 1, "lb": 2}
 _WEIGHT_UNIT_NAMES: dict[int, str] = {v: k for k, v in WEIGHT_UNITS.items()}
 
 # wger's repetition-unit ids (/api/v2/setting-repetitionunit/), keyed by the
-# fixture name lowercased. A log or a planned set that leaves this alone counts
-# repetitions; the other units are what make a plank, a row or a run something
-# other than "60 reps".
+# fixture name lowercased. The ids are NOT in any natural order — seconds is 3
+# and until_failure is 2 — so a caller must look a name up here rather than
+# infer a number from the order it saw the units listed in. A log or a planned
+# set that leaves this alone counts repetitions; the other units are what make a
+# plank, a row or a run something other than "60 reps".
 REPETITION_UNITS: dict[str, int] = {
     "repetitions": 1,
     "until_failure": 2,
