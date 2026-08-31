@@ -126,6 +126,9 @@ def _mock_creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, _Capture]:
         "reps": _Capture(api_models.RepetitionsConfig(id=4, slot_entry=2, iteration=1, value="8")),
         "weight": _Capture(api_models.WeightConfig(id=5, slot_entry=2, iteration=1, value="135")),
         "rir": _Capture(api_models.RiRConfig(id=6, slot_entry=2, iteration=1, value="2")),
+        "max_reps": _Capture(
+            api_models.MaxRepetitionsConfig(id=7, slot_entry=2, iteration=1, value="12")
+        ),
     }
     monkeypatch.setattr(routines.slot_create, "asyncio", captures["slot"])
     monkeypatch.setattr(routines.slot_entry_create, "asyncio", captures["entry"])
@@ -133,6 +136,7 @@ def _mock_creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, _Capture]:
     monkeypatch.setattr(routines.repetitions_config_create, "asyncio", captures["reps"])
     monkeypatch.setattr(routines.weight_config_create, "asyncio", captures["weight"])
     monkeypatch.setattr(routines.rir_config_create, "asyncio", captures["rir"])
+    monkeypatch.setattr(routines.max_repetitions_config_create, "asyncio", captures["max_reps"])
     return captures
 
 
@@ -238,3 +242,58 @@ async def test_weight_without_unit_touches_only_the_config(
     assert not patch.called
     assert post.called
     assert post.body.to_dict().get("weight_unit", UNSET) is UNSET
+
+
+# ---------- max_reps: reps as a range ----------
+
+
+@pytest.mark.asyncio
+async def test_max_reps_records_the_top_of_the_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ "3 x 8-12" is two numbers; without max_reps the top lives only in the chat."""
+    mcp = _register(routines)
+    captures = _mock_creation(monkeypatch)
+    await mcp.call_tool(
+        "add_exercise_with_sets",
+        {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 8, "max_reps": 12},
+    )
+    assert captures["reps"].body.value == "8"
+    assert captures["max_reps"].body.value == "12"
+    assert captures["max_reps"].body.slot_entry == 2
+
+
+@pytest.mark.asyncio
+async def test_max_reps_is_optional(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register(routines)
+    captures = _mock_creation(monkeypatch)
+    await mcp.call_tool(
+        "add_exercise_with_sets",
+        {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 8},
+    )
+    assert captures["reps"].called
+    assert not captures["max_reps"].called
+
+
+@pytest.mark.asyncio
+async def test_max_reps_below_reps_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """reps is the BOTTOM of the range; a top beneath it is a caller mistake, not a plan."""
+    mcp = _register(routines)
+    captures = _mock_creation(monkeypatch)
+    out = _result(
+        await mcp.call_tool(
+            "add_exercise_with_sets",
+            {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 12, "max_reps": 8},
+        )
+    )
+    assert not captures["slot"].called, "nothing may be written when the range is invalid"
+    assert "max_reps" in json.dumps(out)
+
+
+@pytest.mark.asyncio
+async def test_max_reps_equal_to_reps_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register(routines)
+    captures = _mock_creation(monkeypatch)
+    await mcp.call_tool(
+        "add_exercise_with_sets",
+        {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 10, "max_reps": 10},
+    )
+    assert captures["max_reps"].body.value == "10"
