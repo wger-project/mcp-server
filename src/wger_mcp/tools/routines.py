@@ -726,8 +726,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             exercise=(as_int(exercise_id, "exercise_id") if exercise_id is not None else UNSET),
             order=opt(order),
             comment=opt(comment),
-            repetition_unit=opt(as_repetition_unit(repetition_unit)),
-            weight_unit=opt(as_weight_unit(weight_unit)),
+            repetition_unit=opt(as_repetition_unit(repetition_unit, allow_id=True)),
+            weight_unit=opt(as_weight_unit(weight_unit, allow_id=True)),
             slot=opt(as_int(slot_id, "slot_id") if slot_id is not None else None),
             type_=opt(entry_type),
             repetition_rounding=opt(
@@ -870,8 +870,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             exercise=as_int(exercise_id, "exercise_id"),
             order=order,
             comment=comment,
-            repetition_unit=opt(as_repetition_unit(repetition_unit)),
-            weight_unit=opt(as_weight_unit(weight_unit)),
+            repetition_unit=opt(as_repetition_unit(repetition_unit, allow_id=True)),
+            weight_unit=opt(as_weight_unit(weight_unit, allow_id=True)),
             type_=entry_type,
             repetition_rounding=opt(
                 as_decimal(repetition_rounding) if repetition_rounding is not None else None

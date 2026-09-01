@@ -100,38 +100,45 @@ def as_decimal(value: float) -> str:
     return f"{value:g}"
 
 
-def _unit_id(unit: int | str | None, units: dict[str, int], field: str) -> int | None:
+def _unit_id(
+    unit: int | str | None, units: dict[str, int], field: str, allow_id: bool
+) -> int | None:
     """Resolve a unit name to wger's id. ``None`` and a numeric id stay as they are.
 
-    A digit string counts as a numeric id: these parameters are typed
-    ``int | str``, and pydantic's smart union keeps ``"3"`` a string rather
-    than coercing it as it would under a bare ``int``. Every other id on these
-    tools travels as a string, so a caller sending ``"3"`` means id 3.
-
     Names are matched loosely, because wger's own display names ('Until
-    Failure', 'Seconds') are what a caller has most likely seen.
+    Failure', 'Seconds') are what a caller has most likely seen. Loosening a
+    name can only turn a refusal into the right unit.
+
+    ``allow_id`` says whether a digit string means that id. Only the tools
+    whose parameter is typed ``int | str`` set it: there pydantic's smart union
+    keeps ``"3"`` a string instead of coercing it as a bare ``int`` would, and
+    refusing it would drop a case that worked before. Where the parameter is
+    typed ``str``, a number was never accepted, so it stays refused — turning
+    it into an id there would be a new way to write the wrong unit silently.
     """
     if unit is None or isinstance(unit, int):
         return unit
     name = unit.strip().lower().replace(" ", "_")
-    if name.isdigit():
+    if allow_id and name.isdigit():
         return int(name)
     try:
         return units[name]
     except KeyError:
+        expected = ", ".join(units)
         raise ToolInputError(
-            f"unknown {field} '{unit}'; expected one of {', '.join(units)}, or wger's numeric id"
+            f"unknown {field} '{unit}'; expected one of {expected}"
+            + (", or wger's numeric id" if allow_id else "")
         ) from None
 
 
-def as_weight_unit(unit: int | str | None) -> int | None:
+def as_weight_unit(unit: int | str | None, allow_id: bool = False) -> int | None:
     """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``."""
-    return _unit_id(unit, WEIGHT_UNITS, "weight_unit")
+    return _unit_id(unit, WEIGHT_UNITS, "weight_unit", allow_id)
 
 
-def as_repetition_unit(unit: int | str | None) -> int | None:
+def as_repetition_unit(unit: int | str | None, allow_id: bool = False) -> int | None:
     """Look up wger's id for a repetition unit. ``None`` stays ``None``."""
-    return _unit_id(unit, REPETITION_UNITS, "repetition unit")
+    return _unit_id(unit, REPETITION_UNITS, "repetition unit", allow_id)
 
 
 def weight_unit_name(unit_id: Any) -> Any:

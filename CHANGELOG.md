@@ -11,12 +11,15 @@ notes. This file records important changes to *this package*.
   server that took a bare integer with no mapping, so a caller had to know that
   seconds is 3; `log_set` has always taken names. A wrong id is invisible
   afterwards: a 30-second hold written with id 2 is stored as "30 until
-  failure", and nothing in the record says it was meant to be time. Numeric ids
-  still pass through unchanged, whether sent as a number or as a string like
-  `"3"`, and an unknown name is refused before the write instead of reaching
-  wger.
-* Unit names are matched case- and space-insensitively, so wger's own display
-  names ('Seconds', 'Until Failure') are accepted alongside the fixture names.
+  failure", and nothing in the record says it was meant to be time. On these two
+  tools numeric ids still pass through unchanged, whether sent as a number or as
+  a string like `"3"`, and an unknown name is refused before the write instead
+  of reaching wger. Elsewhere — `log_set`, `update_workout_log`,
+  `set_slot_entry_config`, `add_exercise_with_sets` — the unit parameters are
+  typed `str` and have never taken a number, so a number stays refused there.
+* Unit names are matched case- and space-insensitively everywhere, so wger's own
+  display names ('Seconds', 'Until Failure') are accepted alongside the fixture
+  names.
 * The unit lists in `log_set`'s docstring and in the README are reordered to
   match wger's actual ids and now say to pass the name rather than infer a
   number from the list's order. As written before, they listed seconds second
