@@ -277,7 +277,7 @@ The training-plan tree is the largest group and splits in two: `routines_read` (
 | `list_slot_entry_configs(slot_entry_id, kinds?)` | Read per-iteration configs (sets/reps/weight/rir/rest/max_*) |
 | `set_slot_entry_config(slot_entry_id, kind, value, iteration?, operation?, step?, repeat?, weight_unit?, requirements?)` | Add a per-iteration config record. `weight_unit` applies to `kind='weight'`/`'max_weight'` and is recorded on the slot entry. `requirements` gates the step on what was logged — any of `repetitions`, `weight`, `rir`, `rest` |
 | `update_slot_entry_config(kind, config_id, value?, iteration?, ..., requirements?)` / `delete_slot_entry_config(kind, config_id)` | Patch / delete a config record (use to bump weight on progression). `requirements=[]` clears an existing gate |
-| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, slot_order?, weight_unit?, rir?, entry_type?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load |
+| `add_exercise_with_sets(day_id, exercise_id, sets, reps, weight?, max_reps?, slot_order?, weight_unit?, rir?, entry_type?)` | Convenience: slot + entry + sets/reps configs in one call. Omit `weight` to prescribe sets without a load. Pass `max_reps` to store a range: `reps` is the bottom and `max_reps` the top, so 8 and 12 record "3 x 8-12" |
 | `get_workout_for_date(routine_id, workout_date?)` | What the routine prescribes on a date (default today): one entry per planned SET, with exercise name, `slot_entry_id`, reps, weight and RiR. Feed its ids into `log_set` |
 
 ### Workout logs
