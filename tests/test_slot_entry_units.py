@@ -110,3 +110,38 @@ async def test_unknown_unit_name_is_refused(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert not update.called
     assert "secs" in json.dumps(out)
+
+
+@pytest.mark.asyncio
+async def test_numeric_id_as_a_string_still_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`int | str` makes pydantic keep "3" a string; it must still mean id 3.
+
+    Every other id on these tools is typed ``str``, so a client that has
+    learned "ids are strings here" sends "3" — which used to coerce to 3 under
+    the old ``int | None`` and must not start failing now.
+    """
+    mcp = _register()
+    update = _Capture(ENTRY)
+    monkeypatch.setattr(routines.slot_entry_partial_update, "asyncio", update)
+    await mcp.call_tool(
+        "update_slot_entry",
+        {"slot_entry_id": "2", "repetition_unit": "3", "weight_unit": "2"},
+    )
+    assert update.body.repetition_unit == 3
+    assert update.body.weight_unit == 2
+
+
+@pytest.mark.asyncio
+async def test_wgers_own_display_names_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """'Until Failure' is what wger shows and what a caller is likeliest to send."""
+    mcp = _register()
+    update = _Capture(ENTRY)
+    monkeypatch.setattr(routines.slot_entry_partial_update, "asyncio", update)
+    await mcp.call_tool(
+        "update_slot_entry",
+        {"slot_entry_id": "2", "repetition_unit": "Until Failure", "weight_unit": " KG "},
+    )
+    assert update.body.repetition_unit == 2
+    assert update.body.weight_unit == 1

@@ -100,36 +100,38 @@ def as_decimal(value: float) -> str:
     return f"{value:g}"
 
 
-def as_weight_unit(unit: int | str | None) -> int | None:
-    """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``.
+def _unit_id(unit: int | str | None, units: dict[str, int], field: str) -> int | None:
+    """Resolve a unit name to wger's id. ``None`` and a numeric id stay as they are.
 
-    A numeric id passes through unchanged, so a caller that already holds
-    wger's own value is not forced to convert it back into a name.
+    A digit string counts as a numeric id: these parameters are typed
+    ``int | str``, and pydantic's smart union keeps ``"3"`` a string rather
+    than coercing it as it would under a bare ``int``. Every other id on these
+    tools travels as a string, so a caller sending ``"3"`` means id 3.
+
+    Names are matched loosely, because wger's own display names ('Until
+    Failure', 'Seconds') are what a caller has most likely seen.
     """
     if unit is None or isinstance(unit, int):
         return unit
+    name = unit.strip().lower().replace(" ", "_")
+    if name.isdigit():
+        return int(name)
     try:
-        return WEIGHT_UNITS[unit]
+        return units[name]
     except KeyError:
         raise ToolInputError(
-            f"unknown weight_unit '{unit}'; expected one of {', '.join(WEIGHT_UNITS)}"
+            f"unknown {field} '{unit}'; expected one of {', '.join(units)}, or wger's numeric id"
         ) from None
+
+
+def as_weight_unit(unit: int | str | None) -> int | None:
+    """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``."""
+    return _unit_id(unit, WEIGHT_UNITS, "weight_unit")
 
 
 def as_repetition_unit(unit: int | str | None) -> int | None:
-    """Look up wger's id for a repetition unit. ``None`` stays ``None``.
-
-    A numeric id passes through unchanged, so a caller that already holds
-    wger's own value is not forced to convert it back into a name.
-    """
-    if unit is None or isinstance(unit, int):
-        return unit
-    try:
-        return REPETITION_UNITS[unit]
-    except KeyError:
-        raise ToolInputError(
-            f"unknown repetition unit '{unit}'; expected one of {', '.join(REPETITION_UNITS)}"
-        ) from None
+    """Look up wger's id for a repetition unit. ``None`` stays ``None``."""
+    return _unit_id(unit, REPETITION_UNITS, "repetition unit")
 
 
 def weight_unit_name(unit_id: Any) -> Any:
