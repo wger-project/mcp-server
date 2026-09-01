@@ -714,7 +714,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         """Patch a slot entry (the exercise binding).
 
         See attach_exercise_to_slot for entry_type, the unit fields and the
-        rounding fields. slot_id moves the entry to another slot.
+        rounding fields — including the repetition_unit / weight_unit ids, which
+        that docstring states in full. Pass a unit NAME here rather than a
+        remembered number. slot_id moves the entry to another slot.
         """
         if entry_type is not None and entry_type not in EXERCISE_TYPE_ENUM_VALUES:
             return bad_request(
@@ -844,10 +846,13 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         Warmup sets in particular need it — left at 'normal' they count as
         working sets in every later reading of the plan.
 
-        repetition_unit says what `reps` counts and weight_unit what a load is
-        measured in. Both take a name — 'seconds', 'minutes', 'meters',
-        'until_failure', 'repetitions', or 'kg' / 'lb' — or wger's numeric id if
-        you already hold one. Prefer the name: a timed hold written with the
+        repetition_unit says what this entry's prescribed repetitions count,
+        and weight_unit what its load is measured in. Pass the NAME, and do not
+        infer an id from the order of any list of units — wger's ids are
+        repetition_unit: repetitions=1, until_failure=2, seconds=3, minutes=4,
+        miles=5, kilometers=6, max_reps=7, meters=8; weight_unit: kg=1, lb=2.
+        Those ids are accepted here as well, and are the only way to reach a
+        custom unit defined by your instance. A timed hold written with the
         wrong id is stored as a rep count, and no later reading of the plan can
         tell it was meant to be seconds.
 
