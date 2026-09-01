@@ -129,16 +129,26 @@ async def test_explicit_unit_beats_the_profile(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ConnectError("profile unreachable"),
+        # check_weight_unit_enum raises TypeError, not ValueError, for a unit
+        # the generated model does not know — including a null one.
+        TypeError("Unexpected value 'stone'"),
+    ],
+    ids=["unreachable", "unparseable"],
+)
 async def test_unreadable_profile_falls_back_to_kilograms(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
-    """An unreachable profile must not fail the write; wger's own default stands."""
+    """A profile that cannot be read must not fail the write; wger's default stands."""
     mcp = _register(workout_logs)
     create = _Capture(LOG)
     monkeypatch.setattr(workout_logs.workoutlog_create, "asyncio", create)
 
     async def _boom(**kwargs: Any) -> Any:
-        raise httpx.ConnectError("profile unreachable")
+        raise failure
 
     monkeypatch.setattr(common.userprofile_retrieve, "asyncio", _boom)
     await mcp.call_tool("log_set", {"exercise_id": "73", "reps": 5, "weight": 61.23})
@@ -172,7 +182,8 @@ async def test_update_leaves_unit_alone_when_not_given(monkeypatch: pytest.Monke
 # ---------- add_exercise_with_sets ----------
 
 
-def _mock_creation(monkeypatch: pytest.MonkeyPatch) -> dict[str, _Capture]:
+def _mock_creation(monkeypatch: pytest.MonkeyPatch, unit: str = "kg") -> dict[str, _Capture]:
+    _profile(monkeypatch, unit)
     captures = {
         "slot": _Capture(SLOT),
         "entry": _Capture(ENTRY),
@@ -210,6 +221,19 @@ async def test_planned_set_records_unit_and_rir(monkeypatch: pytest.MonkeyPatch)
     assert c["entry"].body.weight_unit == 2
     assert c["weight"].body.value == "135"
     assert c["rir"].body.value == "2"
+
+
+@pytest.mark.asyncio
+async def test_planned_set_follows_a_pound_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Omitting the unit takes it from the profile here too, not a hardcoded kg."""
+    mcp = _register(routines)
+    c = _mock_creation(monkeypatch, "lb")
+    await mcp.call_tool(
+        "add_exercise_with_sets",
+        {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 8, "weight": 225},
+    )
+    assert c["entry"].body.weight_unit == 2
+    assert c["weight"].body.value == "225"
 
 
 @pytest.mark.asyncio

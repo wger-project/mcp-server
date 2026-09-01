@@ -159,8 +159,8 @@ def language_id_resolver(api: AuthenticatedClient) -> Callable[[str], Awaitable[
     return resolve
 
 
-def profile_weight_unit_resolver(api: AuthenticatedClient) -> Callable[[], Awaitable[str]]:
-    """A cached lookup of the authenticated trainee's own weight unit.
+async def profile_weight_unit(api: AuthenticatedClient) -> str:
+    """The authenticated trainee's own weight unit, from their wger profile.
 
     The write tools accept an explicit unit, but a caller that omits one should
     get the unit the trainee actually works in rather than a fixed metric
@@ -168,27 +168,22 @@ def profile_weight_unit_resolver(api: AuthenticatedClient) -> Callable[[], Await
     pounds; storing that as 225 kilograms is wrong by a factor of 2.2, and
     nothing downstream can tell, because the number is plausible either way.
 
-    Cached per resolver: the profile setting does not change mid-session. A
-    failed lookup falls back to ``kg`` — wger's own default — and is not cached,
-    so a transient error does not pin the wrong unit for the whole session.
+    Deliberately not cached, and not a per-registration closure: one shared
+    client serves every user (see :mod:`..api_client`), so a cache here would
+    pin the first trainee's unit onto every other trainee's writes — the same
+    silent wrong-unit write this exists to prevent, spread across users.
+
+    Any failure to read the unit falls back to ``kg``, wger's own default,
+    rather than failing the write: an unreachable profile, an undocumented
+    status, or a value the generated model refuses to parse
+    (``check_weight_unit_enum`` raises ``TypeError``).
     """
-    cache: dict[str, str] = {}
-
-    async def resolve() -> str:
-        if "unit" not in cache:
-            try:
-                profile = await userprofile_retrieve.asyncio(client=api)
-            except (UnexpectedStatus, httpx.HTTPError):
-                return "kg"
-            unit = getattr(profile, "weight_unit", None)
-            # A generated enum renders through .value; a plain str passes through.
-            unit = getattr(unit, "value", unit)
-            if unit not in WEIGHT_UNITS:
-                return "kg"
-            cache["unit"] = unit
-        return cache["unit"]
-
-    return resolve
+    try:
+        profile = await userprofile_retrieve.asyncio(client=api)
+    except (UnexpectedStatus, httpx.HTTPError, TypeError):
+        return "kg"
+    unit = getattr(profile, "weight_unit", None)
+    return unit if unit in WEIGHT_UNITS else "kg"
 
 
 def at_noon(when: date | datetime | None) -> datetime | None:

@@ -36,7 +36,7 @@ from .common import (
     as_weight_unit,
     at_noon,
     opt,
-    profile_weight_unit_resolver,
+    profile_weight_unit,
     require_fields,
 )
 
@@ -51,8 +51,6 @@ REST_MAX = 7200
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
-    _profile_weight_unit = profile_weight_unit_resolver(api)
-
     @mcp.tool()
     @api_tool
     async def log_set(
@@ -114,7 +112,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 "slot_entry_id needs routine_id; both come from get_workout_for_date"
             )
         unit = as_weight_unit(
-            weight_unit if weight_unit is not None else await _profile_weight_unit()
+            weight_unit if weight_unit is not None else await profile_weight_unit(api)
         )
         body = api_models.WorkoutLogRequest(
             exercise=as_int(exercise_id, "exercise_id"),

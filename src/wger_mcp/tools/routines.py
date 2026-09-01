@@ -124,7 +124,7 @@ from .common import (
     bad_request,
     language_id_resolver,
     opt,
-    profile_weight_unit_resolver,
+    profile_weight_unit,
     require_fields,
     weight_unit_name,
 )
@@ -523,8 +523,6 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
 
 def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
     """Authoring the plan: creating, changing and deleting its parts."""
-
-    _profile_weight_unit = profile_weight_unit_resolver(api)
 
     @mcp.tool()
     @api_tool
@@ -985,7 +983,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         day = as_int(day_id, "day_id")
         exercise = as_int(exercise_id, "exercise_id")
         unit = as_weight_unit(
-            weight_unit if weight_unit is not None else await _profile_weight_unit()
+            weight_unit if weight_unit is not None else await profile_weight_unit(api)
         )
         planned: list[tuple[str, float]] = [("sets", sets), ("reps", reps)]
         if weight is not None:
