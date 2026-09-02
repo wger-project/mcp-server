@@ -122,7 +122,13 @@ def _sequence(
                 "iteration": 3,
                 "date": day_date.isoformat(),
                 "label": "Week 3",
-                "day": {"id": 11, "routine": 7, "name": "Push", "is_rest": is_rest},
+                "day": {
+                    "id": 11,
+                    "routine": 7,
+                    "name": "Push",
+                    "is_rest": is_rest,
+                    "description": "Working reps = lower end of range: bench 6-8.",
+                },
                 "slots": slots,
             }
         )
@@ -172,6 +178,9 @@ async def test_returns_slot_entry_ids_for_today(monkeypatch: pytest.MonkeyPatch)
 
     assert out["iteration"] == 3
     assert out["day_name"] == "Push"
+    # The day's notes carry the terms the numbers were written under - a rep
+    # range here - so a caller reporting the plan can quote them.
+    assert out["day_description"] == "Working reps = lower end of range: bench 6-8."
     assert out["is_rest_day"] is False
     assert len(out["planned"]) == 1
     entry = out["planned"][0]
@@ -222,11 +231,14 @@ async def test_unnamed_day_still_answers(monkeypatch: pytest.MonkeyPatch) -> Non
     mcp = _register(routines)
     sequence = _sequence()
     sequence[0].day.name = UNSET
+    sequence[0].day.description = UNSET
     monkeypatch.setattr(routines.routine_date_sequence_gym_list, "asyncio", _Capture(sequence))
     _mock_names(monkeypatch)
     out = _result(await mcp.call_tool("get_workout_for_date", {"routine_id": "7"}))
 
     assert out["day_name"] is None
+    # Same treatment as the name: Unset must not survive the tool boundary.
+    assert out["day_description"] is None
     assert len(out["planned"]) == 1
 
 

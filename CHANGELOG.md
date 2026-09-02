@@ -5,6 +5,14 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* `get_workout_for_date` returns the day's `description` as `day_description`.
+  A routine's per-day notes are where rep ranges, machine substitutions and
+  form cues live, and the tool that answers "what am I doing today" was
+  returning the planned numbers without the terms they were written under — a
+  caller reporting the plan quoted a bare rep count where the routine had
+  specified a range. Unset descriptions come back as `null`, matching
+  `day_name`.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always
