@@ -5,6 +5,12 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* `log_set`'s docstring says to pass `rir` only when the trainee gave a number,
+  and to leave it unset when they described effort in words. A stated range is
+  numbers — record the lower bound. "Felt good" is not, and converting it
+  produces a value indistinguishable from a report once stored. `rir` was
+  already optional; nothing in the schema changes.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always
