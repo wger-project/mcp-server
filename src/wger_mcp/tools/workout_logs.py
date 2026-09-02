@@ -87,6 +87,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         left. It is how wger tracks set effort. rest is the pause after the set,
         in seconds.
 
+        Pass rir ONLY when the trainee gave you a number. A stated range — "3 or
+        4" — is numbers: record the lower bound, the one they are sure of. Effort
+        described in words is not: "felt good", "a few left", "that was hard"
+        convert to a number only by guessing, and the guess is indistinguishable
+        from a report once stored. Leave rir unset instead and ask afterwards.
+        wger accepts a null rir, and null truthfully says "not reported", where
+        an invented 2.0 says "two left in the tank" — a claim the trainee never
+        made, which every later progression decision then reads as fact.
+
         routine_id, slot_entry_id and iteration attach the set to the plan it
         was performed from; get all three from get_workout_for_date. Without
         them the set is still logged and still counts towards the exercise's
