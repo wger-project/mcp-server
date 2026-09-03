@@ -986,6 +986,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         sets: Annotated[int, Field(ge=1, le=50)],
         reps: Annotated[int, Field(ge=1, le=1000)],
         weight: Annotated[float | None, Field(ge=0, le=2000)] = None,
+        max_reps: Annotated[int | None, Field(ge=1, le=1000)] = None,
         slot_order: Annotated[int, Field(ge=1, le=100)] = 1,
         weight_unit: str | None = None,
         rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
@@ -1003,6 +1004,13 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         Omitting weight_unit takes the trainee's own unit from their wger
         profile, so a profile set to pounds does not silently record kilograms.
 
+        max_reps turns reps into a range: reps is the bottom and max_reps the
+        top, which is what a plan means by "3 x 8-12". Without it the plan
+        records a single number, and a range quoted to the trainee lives only in
+        the conversation rather than in the routine. It has to be above reps —
+        wger reports a range only where the top exceeds the bottom, so an equal
+        pair is refused here rather than written and then ignored.
+
         rir sets a Reps-In-Reserve target for the set, wger's autoregulation
         field: 2 means "stop with two good reps left".
 
@@ -1019,7 +1027,14 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         unit = as_weight_unit(
             weight_unit if weight_unit is not None else await profile_weight_unit(api)
         )
+        if max_reps is not None and max_reps <= reps:
+            return bad_request(
+                f"max_reps ({max_reps}) is not above reps ({reps}); reps is the bottom of the "
+                "range, and wger only reports a range whose top is above it"
+            )
         planned: list[tuple[str, float]] = [("sets", sets), ("reps", reps)]
+        if max_reps is not None:
+            planned.append(("max_reps", max_reps))
         if weight is not None:
             planned.append(("weight", weight))
         if rir is not None:
