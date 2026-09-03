@@ -139,6 +139,28 @@ async def test_unknown_repetition_unit_is_refused_locally(
 
 
 @pytest.mark.asyncio
+async def test_a_numeric_reps_unit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """log_set takes names only, so "2" must stay a 400 and never reach wger.
+
+    The slot-entry tools read a digit string as that id, because their
+    parameter is typed ``int | str`` and refusing it would drop a case that
+    used to work. reps_unit has always been ``str``, so no such case exists
+    here — and reading "2" as an id is exactly the incident this docstring
+    warns about, since a caller counting a list arrives at 2 for seconds and
+    would silently store until_failure.
+    """
+    mcp = _register()
+    create = _creator(monkeypatch)
+    out = _result(
+        await mcp.call_tool(
+            "log_set", {"exercise_id": "73", "reps": 30, "weight": 0, "reps_unit": "2"}
+        )
+    )
+    assert not create.calls
+    assert "seconds" in json.dumps(out)  # the error names the valid options
+
+
+@pytest.mark.asyncio
 async def test_a_run_keeps_its_fractional_distance(monkeypatch: pytest.MonkeyPatch) -> None:
     """reps is decimal(6, 2) in wger; 5.5 km must not be truncated to 5."""
     mcp = _register()
