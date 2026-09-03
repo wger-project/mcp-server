@@ -5,6 +5,16 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* `log_set`, `add_exercise_with_sets` and `attach_exercise_to_slot` take their
+  default weight unit from the trainee's own wger profile instead of leaving a
+  hardcoded `kg`. A profile set to pounds now records pounds when the caller
+  omits `weight_unit`; before, a trainee reporting "225" had it stored as 225
+  kg, wrong by a factor of 2.2 and indistinguishable downstream because the
+  number is plausible either way. An explicit `weight_unit` still wins, and a
+  profile that cannot be read refuses the write instead of guessing: the guess
+  is unrecoverable once stored, while the refusal costs one retry with an
+  explicit unit.
+
 * `get_workout_for_date` returns the day's `description` as `day_description`.
   A routine's per-day notes are where rep ranges, machine substitutions and
   form cues live, and the tool that answers "what am I doing today" was
