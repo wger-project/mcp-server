@@ -364,6 +364,12 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
         repetitions, weight and RiR. Feed routine_id, slot_entry_id and
         iteration straight into log_set so the logged set attaches to the plan.
 
+        day_description carries the routine's own notes for that day — rep
+        ranges, machine substitutions, form cues — as the trainee wrote them.
+        The planned numbers say what to do; the description says on what terms,
+        and a caller that reports the plan without it quotes a bare rep count
+        where the routine specified a range.
+
         This is the one call that answers "what am I doing today" and "what is
         in this program". Walking days, slots, entries and their configs costs
         dozens of requests and returns far more than anyone needs.
@@ -407,6 +413,12 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
                 # A day need not be named, and Unset would not survive the
                 # tool boundary as JSON.
                 "day_name": None if isinstance(day.name, Unset) else day.name,
+                # Where a routine keeps its per-day coaching notes: rep ranges,
+                # machine substitutions, form cues. Without it a caller has the
+                # numbers but not the terms they were written under.
+                "day_description": (
+                    None if isinstance(day.description, Unset) else day.description
+                ),
                 "is_rest_day": (day.is_rest is True) or not planned,
                 "planned": planned,
             }
@@ -419,6 +431,7 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
             "label": None,
             "day_id": None,
             "day_name": None,
+            "day_description": None,
             "is_rest_day": True,
             "planned": [],
             "note": "no scheduled day on this date - it may fall outside the routine's range",
