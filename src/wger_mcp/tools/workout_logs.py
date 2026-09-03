@@ -36,6 +36,7 @@ from .common import (
     as_weight_unit,
     at_noon,
     opt,
+    profile_weight_unit,
     require_fields,
 )
 
@@ -58,7 +59,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         weight: Annotated[float, Field(ge=0, le=2000)],
         workout_log_date: date | datetime | None = None,
         rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
-        weight_unit: str = "kg",
+        weight_unit: str | None = None,
         routine_id: str | None = None,
         slot_entry_id: str | None = None,
         iteration: Annotated[int | None, Field(ge=1, le=1000)] = None,
@@ -74,33 +75,49 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         """Log a completed set (workoutlog). Without a date, wger stamps the
         entry with the current time; a bare date lands at 12:00.
 
-        weight_unit is 'kg' or 'lb'. The weight is stored in the unit given, so
-        a trainee who works in pounds gets pounds back out, with no rounding
-        drift from converting twice.
-
-        reps_unit says what `reps` counts. Pass the NAME, never a number — a
-        number is refused here — and do not infer an id from the order of this
-        list: repetitions, until_failure, seconds, minutes, miles, kilometers,
-        max_reps, meters.
-        A plank logged without it is stored as 60 repetitions rather than 60
-        seconds, which no later reading of the log can undo.
-
-        rir records Reps In Reserve for the set: how many good repetitions were
-        left. It is how wger tracks set effort. rest is the pause after the set,
-        in seconds.
+        exercise_id is the movement performed, not always the one the plan
+        names. For a substitution — machine occupied, equipment missing — pass
+        the substitute's own id (search_exercises finds it) and still point
+        routine_id, slot_entry_id and iteration at the planned slot: the set
+        stays attached to the plan while the history stays true to what was
+        lifted. Reusing the planned id files a rope pushdown as a machine
+        pushdown, and nothing downstream can tell the two apart.
 
         routine_id, slot_entry_id and iteration attach the set to the plan it
-        was performed from; get all three from get_workout_for_date. Without
-        them the set is still logged and still counts towards the exercise's
-        history, but it is freestanding work: wger reads a routine's log view
-        and its statistics through the routine link, so an unattached set is
-        invisible there and in the apps that show a plan's progress.
+        was performed from; get them from get_workout_for_date, whose planned
+        entries carry the planned exercise_id alongside. Without them the set is
+        logged as freestanding work: wger reads a routine's log view and its
+        statistics through the routine link, so an unattached set is invisible
+        there and in the apps that show a plan's progress.
+
+        weight_unit is 'kg' or 'lb'; the weight is stored in the unit given,
+        with no conversion. Omitted, it follows the trainee's wger profile, so a
+        profile set to pounds does not silently record kilograms — and a profile
+        that cannot be read refuses the log rather than guessing, so pass the
+        unit to write anyway. weight itself has no default here, so an unloaded
+        set is weight=0.
+
+        reps_unit says what `reps` counts: repetitions (wger's default),
+        until_failure, seconds, minutes, miles, kilometers, max_reps or meters.
+        Pass the name, never a number — a number is refused here — and do not
+        read an id off the order of that list. A plank logged without it is
+        stored as 60 repetitions, not 60 seconds, which no later reading of the
+        log can undo.
+
+        rir records Reps In Reserve: how many good repetitions were left, wger's
+        measure of set effort. A trainee reporting a range — "maybe 3 or 4" —
+        gets the lower bound, the claim they are sure of; do not average it or
+        pick a midpoint they never said. rest is the pause after, in seconds.
 
         The *_target fields record what was prescribed next to what was done, in
         the same row: reps_target, weight_target, rir_target, rest_target.
-        get_workout_for_date supplies the prescribed numbers, so pass them along
-        with the ids and "did I hit the program" is answerable from the log
-        alone, without re-reading the plan as it stands later.
+        get_workout_for_date supplies them, so passing them with the ids makes
+        "did I hit the program" answerable from the log alone.
+
+        This tool only inserts. To revise a set, call update_workout_log with
+        the id from this call's result; calling log_set again writes a second
+        row for one physical set, indistinguishable from two genuine sets at the
+        same load.
 
         session_id attaches the set to a workout session (see
         list_workout_sessions); wger opens one for the day if none is given.
@@ -110,12 +127,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             raise ToolInputError(
                 "slot_entry_id needs routine_id; both come from get_workout_for_date"
             )
+        unit = as_weight_unit(
+            weight_unit if weight_unit is not None else await profile_weight_unit(api)
+        )
         body = api_models.WorkoutLogRequest(
             exercise=as_int(exercise_id, "exercise_id"),
             repetitions=as_decimal(reps),
             repetitions_unit=opt(as_repetition_unit(reps_unit)),
             weight=as_decimal(weight),
-            weight_unit=as_weight_unit(weight_unit),
+            weight_unit=unit,
             date=opt(at_noon(workout_log_date)),
             rir=opt(as_decimal(rir) if rir is not None else None),
             routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),

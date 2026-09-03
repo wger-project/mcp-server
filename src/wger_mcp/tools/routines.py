@@ -125,6 +125,7 @@ from .common import (
     bad_request,
     language_id_resolver,
     opt,
+    profile_weight_unit,
     require_fields,
     weight_unit_name,
 )
@@ -364,6 +365,12 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
         repetitions, weight and RiR. Feed routine_id, slot_entry_id and
         iteration straight into log_set so the logged set attaches to the plan.
 
+        day_description carries the routine's own notes for that day — rep
+        ranges, machine substitutions, form cues — as the trainee wrote them.
+        The planned numbers say what to do; the description says on what terms,
+        and a caller that reports the plan without it quotes a bare rep count
+        where the routine specified a range.
+
         This is the one call that answers "what am I doing today" and "what is
         in this program". Walking days, slots, entries and their configs costs
         dozens of requests and returns far more than anyone needs.
@@ -407,6 +414,12 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
                 # A day need not be named, and Unset would not survive the
                 # tool boundary as JSON.
                 "day_name": None if isinstance(day.name, Unset) else day.name,
+                # Where a routine keeps its per-day coaching notes: rep ranges,
+                # machine substitutions, form cues. Without it a caller has the
+                # numbers but not the terms they were written under.
+                "day_description": (
+                    None if isinstance(day.description, Unset) else day.description
+                ),
                 "is_rest_day": (day.is_rest is True) or not planned,
                 "planned": planned,
             }
@@ -419,6 +432,7 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
             "label": None,
             "day_id": None,
             "day_name": None,
+            "day_description": None,
             "is_rest_day": True,
             "planned": [],
             "note": "no scheduled day on this date - it may fall outside the routine's range",
@@ -852,9 +866,12 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         repetition_unit: repetitions=1, until_failure=2, seconds=3, minutes=4,
         miles=5, kilometers=6, max_reps=7, meters=8; weight_unit: kg=1, lb=2.
         Those ids are accepted here as well, and are the only way to reach a
-        custom unit defined by your instance. A timed hold written with the
-        wrong id is stored as a rep count, and no later reading of the plan can
-        tell it was meant to be seconds.
+        unit this server does not name (plates, body weight, km/h) or a custom
+        one defined by your instance. A timed hold written with the wrong id is
+        stored as a rep count, and no later reading of the plan can tell it was
+        meant to be seconds. Omitting weight_unit takes the trainee's own unit
+        from their wger profile, so a weight set on this entry later is not
+        silently read as kilograms.
 
         repetition_rounding / weight_rounding round what a progression computes
         to something loadable: 2.5 for a gym whose smallest pair of plates makes
@@ -865,13 +882,18 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             return bad_request(
                 f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
             )
+        unit = (
+            as_weight_unit(weight_unit, allow_id=True)
+            if weight_unit is not None
+            else as_weight_unit(await profile_weight_unit(api))
+        )
         body = api_models.SlotEntryRequest(
             slot=as_int(slot_id, "slot_id"),
             exercise=as_int(exercise_id, "exercise_id"),
             order=order,
             comment=comment,
             repetition_unit=opt(as_repetition_unit(repetition_unit, allow_id=True)),
-            weight_unit=opt(as_weight_unit(weight_unit, allow_id=True)),
+            weight_unit=opt(unit),
             type_=entry_type,
             repetition_rounding=opt(
                 as_decimal(repetition_rounding) if repetition_rounding is not None else None
@@ -965,7 +987,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         reps: Annotated[int, Field(ge=1, le=1000)],
         weight: Annotated[float | None, Field(ge=0, le=2000)] = None,
         slot_order: Annotated[int, Field(ge=1, le=100)] = 1,
-        weight_unit: str = "kg",
+        weight_unit: str | None = None,
         rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
         entry_type: str = "normal",
     ) -> dict[str, Any]:
@@ -978,6 +1000,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         which is the honest thing to do before the trainee's working weights are
         known. weight_unit is 'kg' or 'lb' and is recorded on the entry, so the
         number is stored in the unit it was given in rather than converted.
+        Omitting weight_unit takes the trainee's own unit from their wger
+        profile, so a profile set to pounds does not silently record kilograms.
 
         rir sets a Reps-In-Reserve target for the set, wger's autoregulation
         field: 2 means "stop with two good reps left".
@@ -992,7 +1016,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         # Parsed up front: the slot must not be created if a later id is bad
         day = as_int(day_id, "day_id")
         exercise = as_int(exercise_id, "exercise_id")
-        unit = as_weight_unit(weight_unit)
+        unit = as_weight_unit(
+            weight_unit if weight_unit is not None else await profile_weight_unit(api)
+        )
         planned: list[tuple[str, float]] = [("sets", sets), ("reps", reps)]
         if weight is not None:
             planned.append(("weight", weight))
