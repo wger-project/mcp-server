@@ -10,8 +10,17 @@ the settings below matter:
   below.
 
 Since wger 2.6, the server is **multi-user**: every request acts as the
-caller's own wger account. Authentication has two halves that share one
-SSO identity provider (any OIDC IdP — Keycloak, Authentik, Auth0, Okta, …):
+caller's own wger account. Two strategies do that, differing in who issues the
+token:
+
+``MCP_AUTH=wger_oidc`` — **wger itself** (2.7+) is the OAuth2/OIDC provider and
+its REST API accepts the access tokens it issues. This server is then a plain
+resource server: the caller's wger token is put on the outbound ``/api/v2/``
+call unchanged. No IdP, no token exchange, no client credentials — only
+``WGER_BASE_URL``. See ``docs/adr/0005-native-wger-oidc.md``.
+
+``MCP_AUTH=oidc`` — an **external** IdP (Keycloak, Authentik, Auth0, Okta, …)
+issues the token, for setups already fronted by one and for wger < 2.7:
 
 - **Inbound** — the client presents an OIDC-issued token (via MCP-native OAuth
   or out-of-band). The server validates it against the IdP's JWKS.
@@ -21,8 +30,10 @@ SSO identity provider (any OIDC IdP — Keycloak, Authentik, Auth0, Okta, …):
   returned wger JWT as ``Authorization: Bearer`` on the wger REST API. See
   ``docs/adr/0001-multi-user-auth-via-oidc-token-exchange.md``.
 
-Endpoints (JWKS, token) are resolved from the IdP's discovery document
-(``{issuer}/.well-known/openid-configuration``) unless overridden.
+Endpoints (JWKS, token, authorization) are resolved from the provider's
+discovery document (``{issuer}/.well-known/openid-configuration``) unless
+overridden — the issuer being ``WGER_BASE_URL`` under ``wger_oidc`` and
+``OIDC_ISSUER`` under ``oidc``.
 
 Two single-user strategies avoid the IdP entirely, both calling wger with a
 static ``WGER_API_KEY`` (a personal DRF API key):
@@ -52,6 +63,9 @@ MIN_STATIC_TOKEN_LENGTH = 32
 
 
 class AuthStrategy(StrEnum):
+    #: wger 2.7+ is itself the OAuth2/OIDC provider; its token is passed through.
+    wger_oidc = "wger_oidc"
+    #: An external OIDC IdP issues the token; it is exchanged for a wger one.
     oidc = "oidc"
     static_token = "static_token"
     none = "none"
@@ -176,6 +190,20 @@ class Settings(BaseSettings):
     # ---------- inbound auth strategy ----------
     mcp_auth: AuthStrategy = AuthStrategy.oidc
 
+    # ---- native wger OIDC (MCP_AUTH=wger_oidc) ----
+    # Scopes this server asks wger for. `openid` identifies the user; roughly
+    # half the tool surface writes, hence both API scopes. A read-only
+    # deployment drops `api:write` and pairs that with a read-only MCP_TOOLS.
+    mcp_wger_scopes: list[str] = Field(
+        default_factory=lambda: ["openid", "api:read", "api:write"]
+    )
+    # Whether this origin presents itself as the authorization server
+    # (auth/asfacade.py). On by default because claude.ai and others ignore the
+    # `authorization_servers` pointer in the protected-resource metadata; turn
+    # it off to send clients straight to wger, which is the honest answer for
+    # clients that do follow the pointer.
+    mcp_as_facade: bool = True
+
     # ---- SSO identity provider (OIDC) ----
     # Realm/tenant issuer, e.g. https://idp.example.com/realms/main (Keycloak)
     # or https://tenant.auth0.com/. The same IdP wger uses for OIDC login.
@@ -237,6 +265,9 @@ class Settings(BaseSettings):
     # a different path — no rebuild needed, just set the env var.
     oauth_authorize_path: str = "/authorize"
     oauth_token_path: str = "/token"
+    # Dynamic client registration (RFC 7591), proxied only when the provider
+    # offers it — it publishes a registration_endpoint exactly then.
+    oauth_register_path: str = "/register"
 
     # DNS rebinding protection. Empty list disables the check.
     allowed_hosts: list[str] = Field(default_factory=list)
@@ -261,11 +292,23 @@ class Settings(BaseSettings):
     def _normalize_algs(cls, v: list[str]) -> list[str]:
         return [a.strip().upper() for a in v if a.strip()]
 
-    @field_validator("oauth_authorize_path", "oauth_token_path", mode="after")
+    @field_validator(
+        "oauth_authorize_path", "oauth_token_path", "oauth_register_path", mode="after"
+    )
     @classmethod
     def _ensure_leading_slash(cls, v: str) -> str:
         v = v.strip()
         return v if v.startswith("/") else "/" + v
+
+    @field_validator("mcp_wger_scopes", mode="after")
+    @classmethod
+    def _normalize_scopes(cls, v: list[str]) -> list[str]:
+        # A space-separated string is what OAuth itself uses, so accept it too:
+        # MCP_WGER_SCOPES="openid api:read" is the spelling people will reach for.
+        out: list[str] = []
+        for entry in v:
+            out.extend(part for part in entry.split() if part)
+        return list(dict.fromkeys(out))
 
     @field_validator("mcp_tools", mode="after")
     @classmethod
@@ -286,7 +329,14 @@ class Settings(BaseSettings):
     def _check_strategy_requirements(self) -> Settings:
         if self.mcp_transport is Transport.stdio:
             return self._check_stdio_requirements()
-        if self.mcp_auth is AuthStrategy.oidc:
+        if self.mcp_auth is AuthStrategy.wger_oidc:
+            # Nothing to check beyond WGER_BASE_URL, which every strategy needs:
+            # wger issues the token, validates it and names the scopes, so this
+            # server holds no client credentials and no audience of its own.
+            # Listed explicitly so the absence is a decision, not an oversight.
+            if not self.mcp_wger_scopes:
+                raise ValueError("MCP_WGER_SCOPES must not be empty")
+        elif self.mcp_auth is AuthStrategy.oidc:
             missing = [
                 name
                 for name, val in (
@@ -375,6 +425,7 @@ def _csv_to_json_list(name: str) -> None:
 _CSV_VARS = (
     "MCP_OIDC_ALGORITHMS",
     "MCP_OIDC_ALLOWED_USERS",
+    "MCP_WGER_SCOPES",
     "ALLOWED_HOSTS",
     "MCP_TOOLS",
 )

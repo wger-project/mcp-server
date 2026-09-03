@@ -38,6 +38,24 @@ async def reply_unauthorized(
     await resp(scope, receive, send)
 
 
+async def reply_forbidden(
+    scope: Scope, receive: Receive, send: Send, *, reason: str, www_authenticate: str
+) -> None:
+    """403, for a token that is valid but does not carry the required scope.
+
+    Distinct from 401 on purpose: a client that sees 401 re-runs the OAuth flow
+    and gets the same token back, because the grant — not the token — is what
+    is short. RFC 6750 says ``insufficient_scope`` with the scope named, which
+    is what tells the user their connection has to be re-authorized.
+    """
+    resp = JSONResponse(
+        {"error": "insufficient_scope", "reason": reason},
+        status_code=403,
+        headers={"www-authenticate": www_authenticate},
+    )
+    await resp(scope, receive, send)
+
+
 class NoAuthMiddleware:
     """No-op middleware. Use only for local dev (``MCP_AUTH=none``).
 

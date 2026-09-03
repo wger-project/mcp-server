@@ -42,9 +42,9 @@ from .auth import (
     forwarded_origin,
     protected_resource_metadata,
     resource_identifier,
+    uses_oauth,
 )
 from .config import (
-    AuthStrategy,
     Settings,
     Transport,
     env_file_for,
@@ -143,7 +143,8 @@ def build_app(settings: Settings) -> Starlette:
     mcp = server.mcp
 
     # AS facade: lets a client that treats this origin as the OAuth authorization
-    # server (e.g. claude.ai) reach a private IdP. None when not in OIDC mode.
+    # server (e.g. claude.ai) drive the flow here. None when the strategy has no
+    # OAuth provider, or when MCP_AS_FACADE is off.
     as_facade = build_authorization_server_facade(settings)
 
     @contextlib.asynccontextmanager
@@ -195,10 +196,10 @@ def build_app(settings: Settings) -> Starlette:
             seen_paths.add(twin)
     routes = [Route("/health", healthcheck), *mcp_routes]
     # OAuth-protected-resource metadata lets interactive MCP clients discover
-    # the SSO IdP as the authorization server. Only meaningful when OIDC is the
-    # inbound strategy: advertising it under static_token/none would send
-    # clients through an OAuth flow whose result the server never accepts.
-    if settings.mcp_auth is AuthStrategy.oidc and settings.oidc_issuer is not None:
+    # where to authenticate. Only meaningful when the strategy actually has a
+    # provider: advertising it under static_token/none would send clients
+    # through an OAuth flow whose result the server never accepts.
+    if uses_oauth(settings):
         routes.append(Route(WELL_KNOWN_PATH, oauth_metadata))
         if as_facade is not None:
             routes.append(Route(AS_METADATA_PATH, as_metadata))
@@ -206,6 +207,15 @@ def build_app(settings: Settings) -> Starlette:
                 Route(settings.oauth_authorize_path, as_facade.authorize, methods=["GET"])
             )
             routes.append(Route(settings.oauth_token_path, as_facade.token, methods=["POST"]))
+            # Registration only where the provider offers it; a route that
+            # proxies to nothing is worse than no route at all, because a client
+            # reading the metadata would take the 404 for a transient failure.
+            if as_facade.supports_registration:
+                routes.append(
+                    Route(
+                        settings.oauth_register_path, as_facade.register, methods=["POST"]
+                    )
+                )
     app = Starlette(routes=routes, lifespan=lifespan)
     app.router.redirect_slashes = False
     auth_cls, auth_kwargs = build_auth_middleware(settings)

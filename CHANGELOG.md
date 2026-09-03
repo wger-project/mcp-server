@@ -54,6 +54,32 @@ notes. This file records important changes to *this package*.
   already existed for `set_slot_entry_config`; this reaches it from the
   high-level authoring call.
 
+* New inbound auth strategy `MCP_AUTH=wger_oidc` for **wger >= 2.7**, which is
+  itself an OAuth2/OIDC provider whose REST API accepts the tokens it issues.
+  The server becomes a plain resource server: the caller's wger token goes back
+  out on the API call unchanged. No identity provider, no client credentials, no
+  token exchange — `WGER_BASE_URL` is the whole configuration. Because the login
+  runs in the user's browser on wger's own login page, **MFA enrolled in wger
+  works**, which the token-exchange mode could never support. See
+  [ADR 0005](docs/adr/0005-native-wger-oidc.md).
+
+  `MCP_AUTH` still defaults to `oidc`, so nothing changes for an existing
+  deployment; wger >= 2.7 deployments should set `wger_oidc` explicitly.
+
+* The authorization-server facade serves both OAuth modes, and under `wger_oidc`
+  it adds wger's `api:read`/`api:write` scopes to the `/authorize` query and to
+  a proxied dynamic client registration. A generic MCP client asks for `openid`
+  alone, which wger then refuses with `invalid_scope` — a dead connector with no
+  diagnosable cause. `/register` is advertised and proxied exactly when wger has
+  dynamic client registration switched on. New settings: `MCP_WGER_SCOPES`,
+  `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`.
+
+* Tool errors distinguish the two upstream failures a retry cannot fix. A `401`
+  now carries a hint that the connection has to be authorized again, and a `403`
+  names the scope the grant is missing — an agent that saw only the status code
+  retried until it gave up, and a user who had granted `api:read` alone watched
+  every write tool fail opaquely.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always

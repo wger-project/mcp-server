@@ -15,6 +15,22 @@ from starlette.testclient import TestClient
 from wger_api_client.api.userprofile import userprofile_retrieve
 from wger_api_client.models.userprofile import Userprofile
 
+#: The upstream wger every test points at (see the ``_base_env`` fixture).
+WGER_BASE = "https://wger.test"
+#: wger's own OIDC endpoints, as its discovery document reports them since 2.7.
+WGER_DISCOVERY = f"{WGER_BASE}/.well-known/openid-configuration"
+WGER_AUTHORIZE = f"{WGER_BASE}/identity/o/authorize"
+WGER_TOKEN = f"{WGER_BASE}/identity/o/api/token"
+WGER_JWKS = f"{WGER_BASE}/.well-known/jwks.json"
+WGER_USERINFO = f"{WGER_BASE}/identity/o/api/userinfo"
+WGER_REGISTER = f"{WGER_BASE}/identity/o/api/clients"
+#: Where the wger_oidc middleware asks who the bearer of a token is.
+WGER_USERPROFILE = f"{WGER_BASE}/api/v2/userprofile/"
+
+#: Env for MCP_AUTH=wger_oidc — deliberately nothing but the strategy: wger
+#: issues the tokens, so there are no client credentials to configure.
+WGER_OIDC_ENV = {"MCP_AUTH": "wger_oidc"}
+
 ISSUER = "https://idp.test/realms/test"
 AUDIENCE = "wger-mcp-test"
 JWKS_URI = f"{ISSUER}/protocol/openid-connect/certs"
@@ -87,7 +103,13 @@ def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Common upstream config. Each test then sets MCP_AUTH and friends."""
     for var in [k for k in os.environ if is_settings_var(k)]:
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("WGER_BASE_URL", "https://wger.test")
+    monkeypatch.setenv("WGER_BASE_URL", WGER_BASE)
+    # Endpoint discovery is memoised for the process, which is right for a
+    # server that resolves once at startup and wrong for a suite that builds
+    # dozens of apps against differently-mocked providers.
+    from wger_mcp.auth import reset_endpoint_cache
+
+    reset_endpoint_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -140,6 +162,46 @@ def make_token(
         claims.update(extra)
     header = {"alg": "RS256", "kid": key.kid, "typ": "JWT"}
     return jwt.encode(header, claims, key)
+
+
+def wger_discovery_doc(*, registration: bool = False) -> dict[str, Any]:
+    """What wger 2.7 publishes at ``/.well-known/openid-configuration``.
+
+    ``registration_endpoint`` appears exactly when the deployment has dynamic
+    client registration switched on — allauth omits the key otherwise — which is
+    how this server decides whether to offer ``/register`` at all.
+    """
+    doc: dict[str, Any] = {
+        "issuer": WGER_BASE,
+        "authorization_endpoint": WGER_AUTHORIZE,
+        "token_endpoint": WGER_TOKEN,
+        "jwks_uri": WGER_JWKS,
+        "userinfo_endpoint": WGER_USERINFO,
+        "revocation_endpoint": f"{WGER_BASE}/identity/o/api/revoke",
+        "code_challenge_methods_supported": ["S256"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "response_types_supported": ["code"],
+        "scopes_supported": ["api:read", "api:write", "email", "openid", "profile"],
+    }
+    if registration:
+        doc["registration_endpoint"] = WGER_REGISTER
+    return doc
+
+
+@pytest.fixture
+def mock_wger_oidc() -> Iterator[respx.MockRouter]:
+    """wger as an OIDC provider, DCR off."""
+    with respx.mock(assert_all_called=False) as router:
+        router.get(WGER_DISCOVERY).respond(json=wger_discovery_doc())
+        yield router
+
+
+@pytest.fixture
+def mock_wger_oidc_dcr() -> Iterator[respx.MockRouter]:
+    """wger as an OIDC provider, DCR on."""
+    with respx.mock(assert_all_called=False) as router:
+        router.get(WGER_DISCOVERY).respond(json=wger_discovery_doc(registration=True))
+        yield router
 
 
 @pytest.fixture
