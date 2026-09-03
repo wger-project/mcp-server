@@ -179,3 +179,6 @@ cython_debug/
 # Editors
 .idea/
 .vscode/
+
+# Local planning notes, not part of the package
+plan-*.md
