@@ -79,7 +79,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         a trainee who works in pounds gets pounds back out, with no rounding
         drift from converting twice. Omitting it takes the trainee's own unit
         from their wger profile, so a profile set to pounds does not silently
-        record kilograms.
+        record kilograms; a profile that cannot be read refuses the log rather
+        than guessing, so pass the unit to write anyway.
 
         reps_unit says what `reps` counts: repetitions (wger's default),
         seconds, minutes, meters, kilometers, miles, until_failure or max_reps.

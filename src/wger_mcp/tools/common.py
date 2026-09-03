@@ -162,28 +162,40 @@ def language_id_resolver(api: AuthenticatedClient) -> Callable[[str], Awaitable[
 async def profile_weight_unit(api: AuthenticatedClient) -> str:
     """The authenticated trainee's own weight unit, from their wger profile.
 
-    The write tools accept an explicit unit, but a caller that omits one should
-    get the unit the trainee actually works in rather than a fixed metric
-    default. A trainee whose profile says ``lb`` and who reports "225" means 225
-    pounds; storing that as 225 kilograms is wrong by a factor of 2.2, and
-    nothing downstream can tell, because the number is plausible either way.
+    A caller that omits the unit should get the unit the trainee actually works
+    in rather than a fixed metric default. A profile that says ``lb`` and a
+    reported "225" means 225 pounds; storing that as 225 kilograms is wrong by a
+    factor of 2.2, and nothing downstream can tell, because the number is
+    plausible either way.
 
     Deliberately not cached, and not a per-registration closure: one shared
     client serves every user (see :mod:`..api_client`), so a cache here would
-    pin the first trainee's unit onto every other trainee's writes — the same
-    silent wrong-unit write this exists to prevent, spread across users.
+    pin the first trainee's unit onto every other trainee's writes.
 
-    Any failure to read the unit falls back to ``kg``, wger's own default,
-    rather than failing the write: an unreachable profile, an undocumented
-    status, or a value the generated model refuses to parse
-    (``check_weight_unit_enum`` raises ``TypeError``).
+    A unit that cannot be read refuses the write instead of standing in ``kg``.
+    The guess is unrecoverable once stored — the row does not say what was meant
+    — while the refusal costs one retry with an explicit ``weight_unit``. An
+    unreachable wger or an error status propagates to :func:`api_tool`; a reply
+    that will not parse into a unit is a :class:`ToolInputError`, because naming
+    the unit is something the caller can do. ``Userprofile.from_dict`` raises
+    ``TypeError`` for a unit outside ``{kg, lb}`` (``check_weight_unit_enum``),
+    ``KeyError`` for a missing required field, ``ValueError`` for a bad
+    ``date_joined`` or a body that is not JSON.
     """
     try:
         profile = await userprofile_retrieve.asyncio(client=api)
-    except (UnexpectedStatus, httpx.HTTPError, TypeError):
-        return "kg"
-    unit = getattr(profile, "weight_unit", None)
-    return unit if unit in WEIGHT_UNITS else "kg"
+    except (TypeError, KeyError, ValueError) as exc:
+        raise ToolInputError(
+            f"the trainee's wger profile could not be read ({exc}); "
+            "pass weight_unit to say which unit the weight is in"
+        ) from exc
+    unit = profile.weight_unit if profile is not None else None
+    if unit not in WEIGHT_UNITS:
+        raise ToolInputError(
+            f"the trainee's wger profile names no weight unit this server knows ({unit!r}); "
+            "pass weight_unit to say which unit the weight is in"
+        )
+    return unit
 
 
 def at_noon(when: date | datetime | None) -> datetime | None:

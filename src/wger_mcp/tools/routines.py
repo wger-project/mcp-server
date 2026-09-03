@@ -848,18 +848,28 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         to something loadable: 2.5 for a gym whose smallest pair of plates makes
         2.5 kg, 1 for whole repetitions. Without them a percentage step
         prescribes weights no bar can hold.
+
+        weight_unit is a wger unit id from setting-weightunit (1 kg, 2 lb, and
+        the ones this server does not name: plates, body weight, km/h). Omitting
+        it takes the trainee's own unit from their wger profile, so a weight set
+        on this entry later is not silently read as kilograms.
         """
         if entry_type not in EXERCISE_TYPE_ENUM_VALUES:
             return bad_request(
                 f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
             )
+        unit = (
+            weight_unit
+            if weight_unit is not None
+            else as_weight_unit(await profile_weight_unit(api))
+        )
         body = api_models.SlotEntryRequest(
             slot=as_int(slot_id, "slot_id"),
             exercise=as_int(exercise_id, "exercise_id"),
             order=order,
             comment=comment,
             repetition_unit=opt(repetition_unit),
-            weight_unit=opt(weight_unit),
+            weight_unit=opt(unit),
             type_=entry_type,
             repetition_rounding=opt(
                 as_decimal(repetition_rounding) if repetition_rounding is not None else None
