@@ -98,9 +98,11 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         set is weight=0.
 
         reps_unit says what `reps` counts: repetitions (wger's default),
-        seconds, minutes, meters, kilometers, miles, until_failure or max_reps.
-        A plank logged without it is stored as 60 repetitions, not 60 seconds,
-        which no later reading of the log can undo.
+        until_failure, seconds, minutes, miles, kilometers, max_reps or meters.
+        Pass the name, never a number — a number is refused here — and do not
+        read an id off the order of that list. A plank logged without it is
+        stored as 60 repetitions, not 60 seconds, which no later reading of the
+        log can undo.
 
         rir records Reps In Reserve: how many good repetitions were left, wger's
         measure of set effort. A trainee reporting a range — "maybe 3 or 4" —

@@ -31,9 +31,11 @@ WEIGHT_UNITS: dict[str, int] = {"kg": 1, "lb": 2}
 _WEIGHT_UNIT_NAMES: dict[int, str] = {v: k for k, v in WEIGHT_UNITS.items()}
 
 # wger's repetition-unit ids (/api/v2/setting-repetitionunit/), keyed by the
-# fixture name lowercased. A log or a planned set that leaves this alone counts
-# repetitions; the other units are what make a plank, a row or a run something
-# other than "60 reps".
+# fixture name lowercased. The ids are NOT in any natural order — seconds is 3
+# and until_failure is 2 — so a caller must look a name up here rather than
+# infer a number from the order it saw the units listed in. A log or a planned
+# set that leaves this alone counts repetitions; the other units are what make a
+# plank, a row or a run something other than "60 reps".
 REPETITION_UNITS: dict[str, int] = {
     "repetitions": 1,
     "until_failure": 2,
@@ -99,28 +101,45 @@ def as_decimal(value: float) -> str:
     return f"{value:g}"
 
 
-def as_weight_unit(unit: str | None) -> int | None:
+def _unit_id(
+    unit: int | str | None, units: dict[str, int], field: str, allow_id: bool
+) -> int | None:
+    """Resolve a unit name to wger's id. ``None`` and a numeric id stay as they are.
+
+    Names are matched loosely, because wger's own display names ('Until
+    Failure', 'Seconds') are what a caller has most likely seen. Loosening a
+    name can only turn a refusal into the right unit.
+
+    ``allow_id`` says whether a digit string means that id. Only the tools
+    whose parameter is typed ``int | str`` set it: there pydantic's smart union
+    keeps ``"3"`` a string instead of coercing it as a bare ``int`` would, and
+    refusing it would drop a case that worked before. Where the parameter is
+    typed ``str``, a number was never accepted, so it stays refused — turning
+    it into an id there would be a new way to write the wrong unit silently.
+    """
+    if unit is None or isinstance(unit, int):
+        return unit
+    name = unit.strip().lower().replace(" ", "_")
+    if allow_id and name.isdigit():
+        return int(name)
+    try:
+        return units[name]
+    except KeyError:
+        expected = ", ".join(units)
+        raise ToolInputError(
+            f"unknown {field} '{unit}'; expected one of {expected}"
+            + (", or wger's numeric id" if allow_id else "")
+        ) from None
+
+
+def as_weight_unit(unit: int | str | None, allow_id: bool = False) -> int | None:
     """Look up wger's id for 'kg' or 'lb'. ``None`` stays ``None``."""
-    if unit is None:
-        return None
-    try:
-        return WEIGHT_UNITS[unit]
-    except KeyError:
-        raise ToolInputError(
-            f"unknown weight_unit '{unit}'; expected one of {', '.join(WEIGHT_UNITS)}"
-        ) from None
+    return _unit_id(unit, WEIGHT_UNITS, "weight_unit", allow_id)
 
 
-def as_repetition_unit(unit: str | None) -> int | None:
+def as_repetition_unit(unit: int | str | None, allow_id: bool = False) -> int | None:
     """Look up wger's id for a repetition unit. ``None`` stays ``None``."""
-    if unit is None:
-        return None
-    try:
-        return REPETITION_UNITS[unit]
-    except KeyError:
-        raise ToolInputError(
-            f"unknown repetition unit '{unit}'; expected one of {', '.join(REPETITION_UNITS)}"
-        ) from None
+    return _unit_id(unit, REPETITION_UNITS, "repetition unit", allow_id)
 
 
 def weight_unit_name(unit_id: Any) -> Any:
