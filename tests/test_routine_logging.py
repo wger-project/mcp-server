@@ -257,6 +257,9 @@ async def test_date_outside_the_routine_is_not_an_error(monkeypatch: pytest.Monk
     assert out["planned"] == []
     assert out["iteration"] is None
     assert "note" in out
+    # Every key the scheduled-day answer carries is present here too, so a
+    # caller reading the payload does not have to branch on which it got.
+    assert out["day_description"] is None
 
 
 @pytest.mark.asyncio

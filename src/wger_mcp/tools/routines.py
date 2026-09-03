@@ -430,6 +430,7 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
             "label": None,
             "day_id": None,
             "day_name": None,
+            "day_description": None,
             "is_rest_day": True,
             "planned": [],
             "note": "no scheduled day on this date - it may fall outside the routine's range",
