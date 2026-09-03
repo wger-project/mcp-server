@@ -74,55 +74,44 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         """Log a completed set (workoutlog). Without a date, wger stamps the
         entry with the current time; a bare date lands at 12:00.
 
-        weight_unit is 'kg' or 'lb'. The weight is stored in the unit given, so
-        a trainee who works in pounds gets pounds back out, with no rounding
-        drift from converting twice.
+        exercise_id is the movement performed, not always the one the plan
+        names. For a substitution — machine occupied, equipment missing — pass
+        the substitute's own id (search_exercises finds it) and still point
+        routine_id, slot_entry_id and iteration at the planned slot: the set
+        stays attached to the plan while the history stays true to what was
+        lifted. Reusing the planned id files a rope pushdown as a machine
+        pushdown, and nothing downstream can tell the two apart.
+
+        routine_id, slot_entry_id and iteration attach the set to the plan it
+        was performed from; get them from get_workout_for_date, whose planned
+        entries carry the planned exercise_id alongside. Without them the set is
+        logged as freestanding work: wger reads a routine's log view and its
+        statistics through the routine link, so an unattached set is invisible
+        there and in the apps that show a plan's progress.
+
+        weight_unit is 'kg' or 'lb'; the weight is stored in the unit given,
+        with no conversion. weight has no default here, so an unloaded set is
+        weight=0.
 
         reps_unit says what `reps` counts: repetitions (wger's default),
         seconds, minutes, meters, kilometers, miles, until_failure or max_reps.
-        A plank logged without it is stored as 60 repetitions rather than 60
-        seconds, which no later reading of the log can undo.
+        A plank logged without it is stored as 60 repetitions, not 60 seconds,
+        which no later reading of the log can undo.
 
-        rir records Reps In Reserve for the set: how many good repetitions were
-        left. It is how wger tracks set effort. rest is the pause after the set,
-        in seconds. A trainee often reports a range — "maybe 3 or 4" — and the
-        field takes one number: record the LOWER bound. It is the claim they
-        are sure of, and it is the conservative one for deciding load. Do not
-        average the range or invent a value between its ends.
-
-        weight is required, so a bodyweight set is weight=0. That is wger's own
-        convention for unloaded work, not a missing value.
-
-        This tool always INSERTS. To revise a set already written — a corrected
-        rep count, a better RiR — call update_workout_log with the id this call
-        returned, in the `id` field of its result. Calling log_set again writes
-        a second row for the same physical set, and nothing downstream can tell
-        the pair apart from two genuine sets at the same load.
-
-        exercise_id is the movement ACTUALLY PERFORMED, which is not always the
-        one the plan names. When a machine is occupied or a gym lacks the
-        equipment, pass the substitute's own exercise_id and still point
-        routine_id, slot_entry_id and iteration at the planned slot: the set
-        stays attached to the plan and the history stays true to what was
-        lifted. Reusing the slot's planned exercise_id for a substitute files a
-        rope pushdown as a machine pushdown, and no later reading of the log can
-        tell the two apart. search_exercises finds the substitute's id.
-
-        routine_id, slot_entry_id and iteration attach the set to the plan it
-        was performed from; get those three from get_workout_for_date. Its
-        planned entries carry an exercise_id too, but that one is the movement
-        PLANNED — pass it only when it is also the one performed, and pass the
-        substitute's own id when it is not. Without them the set is still
-        logged and still counts towards the exercise's history, but it is
-        freestanding work: wger reads a routine's log view and its statistics
-        through the routine link, so an unattached set is invisible there and
-        in the apps that show a plan's progress.
+        rir records Reps In Reserve: how many good repetitions were left, wger's
+        measure of set effort. A trainee reporting a range — "maybe 3 or 4" —
+        gets the lower bound, the claim they are sure of; do not average it or
+        pick a midpoint they never said. rest is the pause after, in seconds.
 
         The *_target fields record what was prescribed next to what was done, in
         the same row: reps_target, weight_target, rir_target, rest_target.
-        get_workout_for_date supplies the prescribed numbers, so pass them along
-        with the ids and "did I hit the program" is answerable from the log
-        alone, without re-reading the plan as it stands later.
+        get_workout_for_date supplies them, so passing them with the ids makes
+        "did I hit the program" answerable from the log alone.
+
+        This tool only inserts. To revise a set, call update_workout_log with
+        the id from this call's result; calling log_set again writes a second
+        row for one physical set, indistinguishable from two genuine sets at the
+        same load.
 
         session_id attaches the set to a workout session (see
         list_workout_sessions); wger opens one for the day if none is given.
