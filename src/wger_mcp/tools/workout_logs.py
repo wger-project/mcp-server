@@ -36,6 +36,7 @@ from .common import (
     as_weight_unit,
     at_noon,
     opt,
+    profile_weight_unit,
     require_fields,
 )
 
@@ -58,7 +59,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         weight: Annotated[float, Field(ge=0, le=2000)],
         workout_log_date: date | datetime | None = None,
         rir: Annotated[float | None, Field(ge=0, le=RIR_MAX, multiple_of=RIR_STEP)] = None,
-        weight_unit: str = "kg",
+        weight_unit: str | None = None,
         routine_id: str | None = None,
         slot_entry_id: str | None = None,
         iteration: Annotated[int | None, Field(ge=1, le=1000)] = None,
@@ -90,8 +91,11 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         there and in the apps that show a plan's progress.
 
         weight_unit is 'kg' or 'lb'; the weight is stored in the unit given,
-        with no conversion. weight has no default here, so an unloaded set is
-        weight=0.
+        with no conversion. Omitted, it follows the trainee's wger profile, so a
+        profile set to pounds does not silently record kilograms — and a profile
+        that cannot be read refuses the log rather than guessing, so pass the
+        unit to write anyway. weight itself has no default here, so an unloaded
+        set is weight=0.
 
         reps_unit says what `reps` counts: repetitions (wger's default),
         seconds, minutes, meters, kilometers, miles, until_failure or max_reps.
@@ -121,12 +125,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             raise ToolInputError(
                 "slot_entry_id needs routine_id; both come from get_workout_for_date"
             )
+        unit = as_weight_unit(
+            weight_unit if weight_unit is not None else await profile_weight_unit(api)
+        )
         body = api_models.WorkoutLogRequest(
             exercise=as_int(exercise_id, "exercise_id"),
             repetitions=as_decimal(reps),
             repetitions_unit=opt(as_repetition_unit(reps_unit)),
             weight=as_decimal(weight),
-            weight_unit=as_weight_unit(weight_unit),
+            weight_unit=unit,
             date=opt(at_noon(workout_log_date)),
             rir=opt(as_decimal(rir) if rir is not None else None),
             routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
