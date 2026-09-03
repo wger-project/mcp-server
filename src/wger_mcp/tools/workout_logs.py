@@ -85,7 +85,19 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
 
         rir records Reps In Reserve for the set: how many good repetitions were
         left. It is how wger tracks set effort. rest is the pause after the set,
-        in seconds.
+        in seconds. A trainee often reports a range — "maybe 3 or 4" — and the
+        field takes one number: record the LOWER bound. It is the claim they
+        are sure of, and it is the conservative one for deciding load. Do not
+        average the range or invent a value between its ends.
+
+        weight is required, so a bodyweight set is weight=0. That is wger's own
+        convention for unloaded work, not a missing value.
+
+        This tool always INSERTS. To revise a set already written — a corrected
+        rep count, a better RiR — call update_workout_log with the id this call
+        returned, in the `id` field of its result. Calling log_set again writes
+        a second row for the same physical set, and nothing downstream can tell
+        the pair apart from two genuine sets at the same load.
 
         exercise_id is the movement ACTUALLY PERFORMED, which is not always the
         one the plan names. When a machine is occupied or a gym lacks the
