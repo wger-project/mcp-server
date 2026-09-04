@@ -108,6 +108,55 @@ changed at the tool boundary.
   dropped that constraint, and repeating it steered assistants into patching an
   existing session when a second one was wanted.
 
+* `log_set`, `add_exercise_with_sets` and `attach_exercise_to_slot` take their
+  default weight unit from the trainee's own wger profile instead of leaving a
+  hardcoded `kg`. A profile set to pounds now records pounds when the caller
+  omits `weight_unit`; before, a trainee reporting "225" had it stored as 225
+  kg, wrong by a factor of 2.2 and indistinguishable downstream because the
+  number is plausible either way. An explicit `weight_unit` still wins, and a
+  profile that cannot be read refuses the write instead of guessing: the guess
+  is unrecoverable once stored, while the refusal costs one retry with an
+  explicit unit.
+
+* `get_workout_for_date` returns the day's `description` as `day_description`.
+  A routine's per-day notes are where rep ranges, machine substitutions and
+  form cues live, and the tool that answers "what am I doing today" was
+  returning the planned numbers without the terms they were written under — a
+  caller reporting the plan quoted a bare rep count where the routine had
+  specified a range. Unset descriptions come back as `null`, matching
+  `day_name`.
+
+* `attach_exercise_to_slot` and `update_slot_entry` accept a unit NAME for
+  `repetition_unit` and `weight_unit` — any of the names `log_set` already took
+  — as well as wger's numeric id. Before, these were the only unit fields in the
+  server that took a bare integer with no mapping, so a caller had to know that
+  seconds is 3; `log_set` has always taken names. A wrong id is invisible
+  afterwards: a 30-second hold written with id 2 is stored as "30 until
+  failure", and nothing in the record says it was meant to be time. On these two
+  tools numeric ids still pass through unchanged, whether sent as a number or as
+  a string like `"3"`, and an unknown name is refused before the write instead
+  of reaching wger. Elsewhere — `log_set`, `update_workout_log`,
+  `set_slot_entry_config`, `add_exercise_with_sets` — the unit parameters are
+  typed `str` and have never taken a number, so a number stays refused there.
+* Unit names are matched case- and space-insensitively everywhere, so wger's own
+  display names ('Seconds', 'Until Failure') are accepted alongside the fixture
+  names.
+* The unit lists in `log_set`'s docstring and in the README are reordered to
+  match wger's actual ids and now say to pass the name rather than infer a
+  number from the list's order. As written before, they listed seconds second
+  while seconds is id 3 and `until_failure` is id 2, so a reader counting
+  positions arrived at exactly the wrong value. The docstrings of the two
+  slot-entry tools, which do take an id, now state every id outright.
+
+* `add_exercise_with_sets` takes an optional `max_reps`, so a planned set can
+  record a rep RANGE rather than a single number. Without it, "3 x 8-12" had to
+  be stored as `8` and the top lived only in the conversation; a trainee whose
+  progression rule is "add weight once you beat the top of the range" had no
+  stored top to beat. `max_reps` below `reps` is refused before anything is
+  written, since `reps` is the bottom of the range. The `max_reps` config kind
+  already existed for `set_slot_entry_config`; this reaches it from the
+  high-level authoring call.
+
 ## 0.2.0
 
 * `add_exercise_with_sets` returns the created ids, as its docstring always

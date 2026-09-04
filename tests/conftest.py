@@ -12,6 +12,8 @@ import respx
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 from starlette.testclient import TestClient
+from wger_api_client.api.userprofile import userprofile_retrieve
+from wger_api_client.models.userprofile import Userprofile
 
 ISSUER = "https://idp.test/realms/test"
 AUDIENCE = "wger-mcp-test"
@@ -33,6 +35,21 @@ OIDC_ENV = {
     "MCP_OIDC_AUDIENCE": AUDIENCE,
     "MCP_OIDC_USERNAME_CLAIM": "preferred_username",
     "MCP_OIDC_ALLOWED_USERS": "alice",
+}
+
+#: A ``/userprofile/`` reply the generated model accepts. ``Userprofile
+#: .from_dict`` pops eight fields without a default, so a shorter dict raises
+#: ``KeyError`` instead of parsing.
+PROFILE: dict[str, Any] = {
+    "username": "alice",
+    "email": "alice@wger.test",
+    "email_verified": True,
+    "is_trustworthy": False,
+    "date_joined": "2026-01-01T00:00:00Z",
+    "gym": None,
+    "is_temporary": False,
+    "last_workout_notification": None,
+    "weight_unit": "kg",
 }
 
 # Every settings variable has to go, or the developer's shell configures the
@@ -87,6 +104,21 @@ def _skip_version_check(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr("wger_mcp.server.check_wger_version", _noop)
+
+
+@pytest.fixture(autouse=True)
+def profile_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer ``/userprofile/`` for every test, with a kilogram profile.
+
+    The write tools read the trainee's unit whenever the caller omits one, so
+    without this any test that omits it would have to mock the endpoint itself.
+    A test that cares about the unit patches the same attribute again.
+    """
+
+    async def retrieve(**kwargs: Any) -> Userprofile:
+        return Userprofile.from_dict(dict(PROFILE))
+
+    monkeypatch.setattr(userprofile_retrieve, "asyncio", retrieve)
 
 
 @pytest.fixture
