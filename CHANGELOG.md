@@ -5,6 +5,22 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Fixed:** `get_workout_for_date` no longer fails on a date the routine
+  covers but schedules no day on. wger returns one sequence entry per calendar
+  day, and `fit_in_week` pads the rest of the week with entries whose `day` is
+  null — four of the seven for a three-day split, so the common shape rather
+  than an edge case. The tool reached for that day's id and raised. It now
+  answers the way it already did for a rest day: `planned: []` with
+  `is_rest_day` true, keeping the entry's own iteration.
+
+  The null itself was never in wger's OpenAPI schema, which declares both `day`
+  and `label` as required and non-nullable on the two `WorkoutDayData`
+  serializers. The generated client believed it and died parsing the response
+  before this server saw it, which is why the tool failed for entire routines
+  rather than for single dates. Fixing that needs `allow_null=True` on those
+  serializer fields and a regenerated client; this change is what the server
+  does once such an entry reaches it.
+
 * **Security:** a bad configuration no longer prints part of `WGER_API_KEY` to
   the log. Pydantic attaches the raw input to a `ValidationError` as
   `input_value` and truncates only its middle, so the tail of whatever secret

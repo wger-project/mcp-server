@@ -386,6 +386,21 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
         for entry in sequence or []:
             if entry.date != target:
                 continue
+            if entry.day is None:
+                # A date the routine covers but puts no day on. fit_in_week pads
+                # the rest of the week with these, so they are the common case,
+                # not the edge: a three-day split leaves four of them per week.
+                return {
+                    "routine_id": routine_id,
+                    "date": entry.date.isoformat(),
+                    "iteration": entry.iteration,
+                    "label": entry.label,
+                    "day_id": None,
+                    "day_name": None,
+                    "day_description": None,
+                    "is_rest_day": True,
+                    "planned": [],
+                }
             planned: list[dict[str, Any]] = [
                 {
                     "slot_entry_id": cfg.slot_entry_id,
