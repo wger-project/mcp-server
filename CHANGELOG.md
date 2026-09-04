@@ -5,6 +5,21 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Security:** a bad configuration no longer prints part of `WGER_API_KEY` to
+  the log. Pydantic attaches the raw input to a `ValidationError` as
+  `input_value` and truncates only its middle, so the tail of whatever secret
+  was set survived into the message — and nothing caught that error, so it
+  reached stderr as an uncaught traceback: the client's MCP log under stdio,
+  the container log under http. A short key would have appeared in full.
+  `load_settings` now restates such a failure as `ConfigError`, carrying the
+  messages and none of the values, and the server turns it into the same
+  one-line exit it already gave for a bad `--transport`. Separately,
+  `WGER_API_KEY`, `MCP_STATIC_TOKEN` and `OIDC_CLIENT_SECRET` are `SecretStr`,
+  so anything that formats the settings object — a log line, a traceback frame
+  — sees `**********` rather than the value. Reading them back in code needs
+  `.get_secret_value()`; note that `str()` on one of these yields the mask, not
+  the secret.
+
 * `log_set`, `add_exercise_with_sets` and `attach_exercise_to_slot` take their
   default weight unit from the trainee's own wger profile instead of leaving a
   hardcoded `kg`. A profile set to pounds now records pounds when the caller

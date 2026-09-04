@@ -23,12 +23,12 @@ import anyio
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import ValidationError
 from starlette.testclient import TestClient
 
 from wger_mcp.config import (
     DEFAULT_ENV_FILE,
     AuthStrategy,
+    ConfigError,
     Settings,
     Transport,
     env_file_for,
@@ -514,7 +514,7 @@ class TestStdioAuthStrategy:
 
     @pytest.mark.parametrize("strategy", ["oidc", "static_token"])
     def test_a_chosen_strategy_is_refused_rather_than_rewritten(self, strategy: str) -> None:
-        with pytest.raises(ValidationError, match=f"cannot use MCP_AUTH={strategy}"):
+        with pytest.raises(ConfigError, match=f"cannot use MCP_AUTH={strategy}"):
             self._load(MCP_AUTH=strategy, MCP_STATIC_TOKEN="short")
 
     def test_saying_none_out_loud_is_allowed(self) -> None:
@@ -618,7 +618,8 @@ class TestStdioSettingsPure:
             wger_dev_token="legacy-value",
         )
         assert settings.mcp_auth is AuthStrategy.none
-        assert settings.wger_dev_token == "legacy-value"
+        assert settings.wger_dev_token is not None
+        assert settings.wger_dev_token.get_secret_value() == "legacy-value"
 
     def test_new_name_wins_when_both_are_set(self) -> None:
         """WGER_API_KEY is the current name, so it wins rather than racing the
@@ -628,7 +629,8 @@ class TestStdioSettingsPure:
             mcp_transport="stdio",
             **{"WGER_API_KEY": "current", "WGER_DEV_TOKEN": "legacy"},
         )
-        assert settings.wger_dev_token == "current"
+        assert settings.wger_dev_token is not None
+        assert settings.wger_dev_token.get_secret_value() == "current"
 
     def test_stdio_ignores_http_only_fields_without_erroring(self) -> None:
         """host, port and allowed_hosts mean nothing under stdio, but setting
