@@ -106,6 +106,27 @@ def test_env_var_is_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
         os.environ.pop("MCP_TOOLS", None)
 
 
+def test_env_file_accepts_the_same_csv(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CSV spelling must not depend on the source it came from.
+
+    The same line used to crash when written in an env file, because only
+    ``os.environ`` was rewritten to the JSON form pydantic-settings parses.
+    """
+    monkeypatch.setenv("MCP_AUTH", "none")
+    monkeypatch.setenv("WGER_API_KEY", "dev")
+    env_file = tmp_path / "settings.env"
+    env_file.write_text("WGER_BASE_URL=https://wger.test\nMCP_TOOLS=nutrition, workout_logs\n")
+    assert load_settings(env_file=str(env_file)).mcp_tools == ["nutrition", "workout_logs"]
+
+
+def test_env_var_json_spelling_keeps_working(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing deployments may spell the list as JSON; both forms are read."""
+    monkeypatch.setenv("MCP_AUTH", "none")
+    monkeypatch.setenv("WGER_API_KEY", "dev")
+    monkeypatch.setenv("MCP_TOOLS", '["nutrition"]')
+    assert load_settings().mcp_tools == ["nutrition"]
+
+
 def test_every_group_name_is_a_valid_selection() -> None:
     """TOOL_GROUPS is the documented list, so each entry must work on its own."""
     for group in TOOL_GROUPS:

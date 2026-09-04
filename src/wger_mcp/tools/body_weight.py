@@ -25,6 +25,7 @@ from .common import (
     as_int,
     at_noon,
     opt,
+    opt_decimal,
     require_fields,
 )
 
@@ -63,7 +64,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         """Patch a body-weight entry."""
         entry = as_int(entry_id, "entry_id")
         body = api_models.PatchedWeightEntryRequest(
-            weight=opt(as_decimal(weight_kg) if weight_kg is not None else None),
+            weight=opt_decimal(weight_kg),
             date=opt(at_noon(when)),
         )
         require_fields(body)

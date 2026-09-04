@@ -97,6 +97,26 @@ def _set_config(**overrides: Any) -> dict[str, Any]:
     return cfg
 
 
+def _dayless_sequence(
+    day_date: date = TODAY,
+) -> list[api_models.WorkoutDayDataGymMode]:
+    """A date the routine covers but schedules nothing on.
+
+    Built directly rather than through from_dict: a client whose schema still
+    calls `day` non-nullable dies parsing this, which is the bug that hid the
+    case. The server has to survive the entry however the client produced it.
+    """
+    return [
+        api_models.WorkoutDayDataGymMode(
+            iteration=3,
+            date=day_date,
+            label=None,
+            day=None,
+            slots=[],
+        )
+    ]
+
+
 def _sequence(
     day_date: date = TODAY,
     *,
@@ -275,6 +295,28 @@ async def test_rest_day_reports_no_planned_work(monkeypatch: pytest.MonkeyPatch)
     assert out["is_rest_day"] is True
     assert out["planned"] == []
     assert out["day_name"] == "Push"
+
+
+@pytest.mark.asyncio
+async def test_a_date_the_routine_puts_no_day_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """fit_in_week pads the rest of the week with entries carrying no day at
+    all — four of the seven for a three-day split, so the common shape rather
+    than an edge. Reaching for the day's id on one of those crashed the tool."""
+    mcp = _register(routines)
+    monkeypatch.setattr(
+        routines.routine_date_sequence_gym_list, "asyncio", _Capture(_dayless_sequence())
+    )
+    out = _result(await mcp.call_tool("get_workout_for_date", {"routine_id": "7"}))
+
+    assert out["is_rest_day"] is True
+    assert out["planned"] == []
+    assert out["day_id"] is None
+    assert out["day_name"] is None
+    assert out["day_description"] is None
+    # The date is covered by the routine, so unlike an out-of-range date this
+    # keeps the entry's own iteration and carries no "outside the range" note.
+    assert out["iteration"] == 3
+    assert "note" not in out
 
 
 # ---------- log_set linkage ----------

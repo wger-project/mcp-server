@@ -9,12 +9,13 @@ wger credential (see ``exchange.py``). Provider-agnostic — any OIDC IdP.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
 import httpx
 from joserfc import jwt
-from joserfc.errors import JoseError
+from joserfc.errors import InvalidKeyIdError, JoseError
 from joserfc.jwk import KeySet
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -26,22 +27,65 @@ from .oauth import WELL_KNOWN_PATH, forwarded_origin
 log = logging.getLogger(__name__)
 
 
+# The shortest gap between two forced refetches. A forced refetch is asked for
+# by an *unauthenticated* request — anyone can present a token naming a key id
+# we do not hold — so without a floor a stream of such tokens is a stream of
+# requests to the IdP, at whatever rate the sender likes.
+_MIN_FORCED_REFETCH_INTERVAL = 60.0
+
+
 class JwksCache:
-    def __init__(self, uri: str, ttl_seconds: int) -> None:
+    """The IdP's signing keys, refetched when ``ttl_seconds`` has passed.
+
+    ``force`` asks for one ahead of the TTL, which is how a key rotated at the
+    IdP is picked up before the cache would notice. It is rate-limited by
+    :data:`_MIN_FORCED_REFETCH_INTERVAL` and, like the ordinary refresh,
+    deduplicated: concurrent requests arriving on an empty or stale cache make
+    one fetch between them rather than one apiece.
+    """
+
+    def __init__(
+        self,
+        uri: str,
+        ttl_seconds: int,
+        *,
+        min_forced_interval: float = _MIN_FORCED_REFETCH_INTERVAL,
+    ) -> None:
         self._uri = uri
         self._ttl = ttl_seconds
+        self._min_forced_interval = min_forced_interval
         self._keys: KeySet | None = None
         self._fetched_at: float = 0.0
+        # Of the last *forced* refetch specifically. Measuring the floor from
+        # the last fetch of any kind would make an ordinary refresh — or the
+        # very first one — start the window, and a key rotated moments later
+        # would be answered with 401s until it ran out.
+        self._forced_at: float = 0.0
+        self._lock = asyncio.Lock()
+
+    def _stale(self, force: bool) -> bool:
+        if self._keys is None:
+            return True
+        if force:
+            return time.time() - self._forced_at >= self._min_forced_interval
+        return time.time() - self._fetched_at > self._ttl
 
     async def get(self, *, force: bool = False) -> KeySet:
-        now = time.time()
-        if force or self._keys is None or now - self._fetched_at > self._ttl:
+        if not self._stale(force):
+            return self._keys  # type: ignore[return-value]
+        async with self._lock:
+            # Another request may have fetched while this one waited for the lock.
+            if not self._stale(force):
+                return self._keys  # type: ignore[return-value]
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(self._uri)
                 resp.raise_for_status()
-                self._keys = KeySet.import_key_set(resp.json())
-                self._fetched_at = now
-        return self._keys
+                keys = KeySet.import_key_set(resp.json())
+            self._keys = keys
+            self._fetched_at = time.time()
+            if force:
+                self._forced_at = self._fetched_at
+            return keys
 
 
 def _aud_ok(claims: dict, audience: str | None) -> bool:
@@ -162,7 +206,15 @@ class OidcAuthMiddleware:
         keys = await self._jwks.get()
         try:
             decoded = jwt.decode(token, keys, algorithms=self._algorithms)
-        except JoseError:
+        except InvalidKeyIdError:
+            # The token names a signing key this set does not hold, which is
+            # what a rotation at the IdP looks like from here. Every other
+            # JoseError — bad signature, malformed token, unsupported
+            # algorithm — describes the token rather than our keys, and
+            # refetching on those turned any junk token into a request to the
+            # IdP. (A token carrying no kid at all fails as a bad signature, so
+            # a rotation is picked up by the TTL rather than here; IdPs that
+            # rotate keys publish a kid.)
             keys = await self._jwks.get(force=True)
             decoded = jwt.decode(token, keys, algorithms=self._algorithms)
         self._claims_registry.validate(decoded.claims)

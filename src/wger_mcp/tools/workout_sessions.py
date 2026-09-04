@@ -33,6 +33,7 @@ from .common import (
     as_uuid,
     bad_request,
     opt,
+    opt_int,
     require_fields,
 )
 
@@ -119,8 +120,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         if (time_start is None) != (time_end is None):
             return bad_request("time_start and time_end must be given together")
         body = api_models.WorkoutSessionRequest(
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            routine=opt_int(routine_id, "routine_id"),
+            day=opt_int(day_id, "day_id"),
             date=opt(when or date.today()),
             notes=opt(notes),
             impression=opt(as_impression(impression)),
@@ -150,8 +151,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         """
         session = as_uuid(session_id, "session_id")
         body = api_models.PatchedWorkoutSessionRequest(
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            routine=opt_int(routine_id, "routine_id"),
+            day=opt_int(day_id, "day_id"),
             date=opt(when),
             notes=opt(notes),
             impression=opt(as_impression(impression)),

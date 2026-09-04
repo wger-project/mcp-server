@@ -36,15 +36,36 @@ static ``WGER_API_KEY`` (a personal DRF API key):
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import AliasChoices, Field, HttpUrl, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    AliasChoices,
+    Field,
+    HttpUrl,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class ConfigError(ValueError):
+    """A settings problem, stated without echoing the values it was given.
+
+    Pydantic attaches the raw input dict to a ValidationError as ``input_value``
+    and truncates only its middle, so the tail of WGER_API_KEY survives into the
+    message. That message reaches stderr at startup — the client's MCP log under
+    stdio, the container log under http. SecretStr does not help there: the dict
+    holds what the env source read, before any field was validated.
+    """
+
 
 # Minimum length for MCP_STATIC_TOKEN. 32 chars is roughly the shortest value
 # that is still awkward to brute-force; `openssl rand -hex 32` gives 64.
@@ -187,14 +208,14 @@ class Settings(BaseSettings):
 
     # Inbound-token validation.
     mcp_oidc_audience: str | None = None  # if set, inbound 'aud'/'azp' must contain it
-    mcp_oidc_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
+    mcp_oidc_algorithms: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["RS256"])
     mcp_oidc_username_claim: str = "preferred_username"
-    mcp_oidc_allowed_users: list[str] = Field(default_factory=list)
+    mcp_oidc_allowed_users: Annotated[list[str], NoDecode] = Field(default_factory=list)
     mcp_jwks_ttl_seconds: int = 3600
 
     # ---- token exchange (this server as a confidential OIDC client) ----
     oidc_client_id: str | None = None
-    oidc_client_secret: str | None = None
+    oidc_client_secret: SecretStr | None = None
     # Target audience of the exchange = wger's OIDC client id at the IdP.
     wger_oidc_audience: str | None = None
 
@@ -210,13 +231,13 @@ class Settings(BaseSettings):
     # A personal wger DRF API key, sent as 'Authorization: Token <...>'.
     # WGER_API_KEY is the name to document — it says what the value is. The
     # older WGER_DEV_TOKEN keeps working for existing deployments.
-    wger_dev_token: str | None = Field(
+    wger_dev_token: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("WGER_API_KEY", "WGER_DEV_TOKEN"),
     )
     # Shared secret callers must present as a bearer token under
     # MCP_AUTH=static_token. Unused by the other strategies.
-    mcp_static_token: str | None = None
+    mcp_static_token: SecretStr | None = None
 
     # ---------- transport ----------
     # Everything below this line except `mcp_transport` applies to http only.
@@ -239,14 +260,14 @@ class Settings(BaseSettings):
     oauth_token_path: str = "/token"
 
     # DNS rebinding protection. Empty list disables the check.
-    allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # ---------- tool surface ----------
     # Tool groups to register, by module name (see wger_mcp.tools.TOOL_GROUPS).
     # Empty = every group. Useful for agents driven by small local models, which
     # lose accuracy as the tool count grows, and for single-purpose agents that
     # need only part of the API. An unknown name is rejected at startup.
-    mcp_tools: list[str] = Field(default_factory=list)
+    mcp_tools: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # ---------- localisation ----------
     # Default ISO 639-1 language for content lookups. Used as the default for
@@ -255,6 +276,29 @@ class Settings(BaseSettings):
     # ``ingredients_text_<lang>``) are requested and preferred. Per-call
     # arguments always win over this default.
     default_language: str = "en"
+
+    @field_validator(
+        "mcp_oidc_algorithms",
+        "mcp_oidc_allowed_users",
+        "allowed_hosts",
+        "mcp_tools",
+        mode="before",
+    )
+    @classmethod
+    def _split_list(cls, v: Any) -> Any:
+        """Accept comma-separated values for list-typed settings.
+
+        ``NoDecode`` turns off pydantic-settings' JSON-only parsing for these
+        fields, so the raw string lands here no matter which source it came
+        from — the process environment and an env file behave the same. The
+        JSON spelling (``["a","b"]``) keeps working for existing deployments.
+        """
+        if not isinstance(v, str):
+            return v
+        v = v.strip()
+        if v.startswith("["):
+            return json.loads(v)
+        return [p.strip() for p in v.split(",") if p.strip()]
 
     @field_validator("mcp_oidc_algorithms", mode="after")
     @classmethod
@@ -312,7 +356,9 @@ class Settings(BaseSettings):
                 raise ValueError("MCP_AUTH=static_token requires: " + ", ".join(missing))
             # The secret is the only thing standing between the network and full
             # access to the wger account, so refuse trivially guessable values.
-            if len(str(self.mcp_static_token)) < MIN_STATIC_TOKEN_LENGTH:
+            # str() on a SecretStr is the mask, which is always 10 characters.
+            static = self.mcp_static_token
+            if static is not None and len(static.get_secret_value()) < MIN_STATIC_TOKEN_LENGTH:
                 raise ValueError(
                     f"MCP_STATIC_TOKEN must be at least {MIN_STATIC_TOKEN_LENGTH} "
                     "characters; generate one with: openssl rand -hex 32"
@@ -356,30 +402,6 @@ class Settings(BaseSettings):
         return str(self.wger_base_url).rstrip("/") + self.wger_allauth_provider_token_path
 
 
-def _csv_to_json_list(name: str) -> None:
-    """Allow comma-separated values for list-typed env vars."""
-    import os
-
-    if name not in os.environ:
-        return
-    raw = os.environ[name].strip()
-    if not raw:
-        os.environ[name] = "[]"
-        return
-    if raw.startswith("["):
-        return
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    os.environ[name] = "[" + ",".join(f'"{p}"' for p in parts) + "]"
-
-
-_CSV_VARS = (
-    "MCP_OIDC_ALGORITHMS",
-    "MCP_OIDC_ALLOWED_USERS",
-    "ALLOWED_HOSTS",
-    "MCP_TOOLS",
-)
-
-
 def load_settings(*, env_file: str | None = DEFAULT_ENV_FILE, **overrides: Any) -> Settings:
     """Build :class:`Settings` from the environment.
 
@@ -387,7 +409,24 @@ def load_settings(*, env_file: str | None = DEFAULT_ENV_FILE, **overrides: Any) 
     that know the transport should get it from :func:`env_file_for` rather than
     deciding again. ``overrides`` take precedence over both the file and the
     environment; ``server.main`` uses them for command-line flags.
+
+    A bad configuration is raised as :class:`ConfigError`, which states the
+    problem without the offending values — see that class for why.
     """
-    for var in _CSV_VARS:
-        _csv_to_json_list(var)
-    return Settings(_env_file=env_file, **overrides)  # type: ignore[call-arg]
+    try:
+        return Settings(_env_file=env_file, **overrides)  # type: ignore[call-arg]
+    except ValidationError as exc:
+        message = _describe(exc)
+    # Raised outside the handler on purpose: inside it, the ValidationError
+    # would be attached as __context__ and carry the input dict along with it,
+    # where `raise ... from None` only hides it from the printed traceback.
+    raise ConfigError(message)
+
+
+def _describe(exc: ValidationError) -> str:
+    """Render a ValidationError as its messages alone, dropping every input."""
+    parts = []
+    for err in exc.errors():
+        where = ".".join(str(p) for p in err["loc"])
+        parts.append(f"{where}: {err['msg']}" if where else err["msg"])
+    return "; ".join(parts)

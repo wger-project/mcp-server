@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -19,9 +19,36 @@ from wger_api_client.errors import UnexpectedStatus
 
 from ..api_client import paginate
 from ..config import Settings
-from .common import api_tool, as_int, bad_request, opt
+from .common import api_tool, as_int, bad_request, day_bounds, opt
 
-VOLUME_METRICS: tuple[str, ...] = ("volume", "sets", "reps", "top_weight", "est_1rm")
+
+class _Metric(NamedTuple):
+    """One metric, in the two spellings it has.
+
+    ``name`` is what the ``metrics`` argument accepts; ``field`` is the key it
+    carries in a bucket and in a result row (the two differ for volume alone,
+    which reports its unit). ``decimals`` is ``None`` for the counts, which
+    stay whole numbers rather than being rounded into floats.
+    """
+
+    name: str
+    field: str
+    decimals: int | None
+
+
+#: Every metric the aggregating tools report, in the order rows list them.
+#: The buckets, the projection and compare_periods' deltas all read this, so a
+#: new metric is an entry here plus the line in :func:`_accumulate` that knows
+#: how to compute it — not five edits spread over the module.
+METRICS: tuple[_Metric, ...] = (
+    _Metric("volume", "volume_kg", 2),
+    _Metric("sets", "sets", None),
+    _Metric("reps", "reps", None),
+    _Metric("top_weight", "top_weight", 2),
+    _Metric("est_1rm", "est_1rm", 2),
+)
+
+VOLUME_METRICS: tuple[str, ...] = tuple(m.name for m in METRICS)
 GROUP_BY_OPTIONS: tuple[str, ...] = ("none", "exercise", "muscle", "category")
 
 # Exercise metadata (name/category/muscles) is effectively static per wger
@@ -98,7 +125,8 @@ async def _load_ex_meta(
 
 
 def _new_metric_bucket() -> dict[str, float]:
-    return {"volume_kg": 0.0, "sets": 0, "reps": 0, "top_weight": 0.0, "est_1rm": 0.0}
+    # int zeros for the counts, so a set count leaves as 3 rather than 3.0
+    return {m.field: (0 if m.decimals is None else 0.0) for m in METRICS}
 
 
 def _accumulate(bucket: dict[str, float], reps: int, weight: float) -> None:
@@ -112,18 +140,28 @@ def _accumulate(bucket: dict[str, float], reps: int, weight: float) -> None:
         bucket["est_1rm"] = est
 
 
+def _rounded(value: float, metric: _Metric) -> Any:
+    """A metric's value as it is reported: counts whole, the rest rounded."""
+    return value if metric.decimals is None else round(value, metric.decimals)
+
+
 def _project(bucket: dict[str, float], selected: list[str]) -> dict[str, Any]:
+    return {m.field: _rounded(bucket[m.field], m) for m in METRICS if m.name in selected}
+
+
+def _delta(a: dict[str, float], b: dict[str, float], selected: list[str]) -> dict[str, Any]:
+    return {m.field: _rounded(a[m.field] - b[m.field], m) for m in METRICS if m.name in selected}
+
+
+def _delta_pct(a: dict[str, float], b: dict[str, float], selected: list[str]) -> dict[str, Any]:
+    """Change relative to ``b``. ``None`` where b is zero: everything is an
+    increase from nothing, and no percentage says how much."""
     out: dict[str, Any] = {}
-    if "volume" in selected:
-        out["volume_kg"] = round(bucket["volume_kg"], 2)
-    if "sets" in selected:
-        out["sets"] = bucket["sets"]
-    if "reps" in selected:
-        out["reps"] = bucket["reps"]
-    if "top_weight" in selected:
-        out["top_weight"] = round(bucket["top_weight"], 2)
-    if "est_1rm" in selected:
-        out["est_1rm"] = round(bucket["est_1rm"], 2)
+    for m in METRICS:
+        if m.name not in selected:
+            continue
+        base = b[m.field]
+        out[m.field] = None if base == 0 else round(((a[m.field] - base) / base) * 100, 1)
     return out
 
 
@@ -188,28 +226,24 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         since = _since(days)
         logs = await _fetch_logs(api, limit=1000, since=since)
 
+        # The metric bucket plus the one thing this tool counts that no other
+        # does: the distinct days the exercise was trained on.
         per_exercise: dict[int, dict[str, Any]] = defaultdict(
-            lambda: {"sets": 0, "reps": 0, "volume_kg": 0.0, "dates": set()}
+            lambda: {**_new_metric_bucket(), "dates": set()}
         )
         for entry in logs:
             ex_id = entry.get("exercise")
             if ex_id is None:
                 continue
-            reps = _entry_reps(entry)
-            weight = _safe_float(entry.get("weight"))
             bucket = per_exercise[ex_id]
-            bucket["sets"] += 1
-            bucket["reps"] += reps
-            bucket["volume_kg"] += reps * weight
+            _accumulate(bucket, _entry_reps(entry), _safe_float(entry.get("weight")))
             if d := _entry_day(entry):
                 bucket["dates"].add(d)
 
         breakdown = [
             {
                 "exercise_id": ex_id,
-                "sets": v["sets"],
-                "reps": v["reps"],
-                "volume_kg": round(v["volume_kg"], 2),
+                **_project(v, ["volume", "sets", "reps"]),
                 "active_days": len(v["dates"]),
             }
             for ex_id, v in sorted(
@@ -238,17 +272,14 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             api, limit=limit, since=since, exercise=as_int(exercise_id, "exercise_id")
         )
         sessions: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"sets": 0, "reps": 0, "volume_kg": 0.0, "top_weight": 0.0, "entries": []}
+            lambda: {**_new_metric_bucket(), "entries": []}
         )
         for entry in logs:
             weight = _safe_float(entry.get("weight"))
             reps = _entry_reps(entry)
             day = _entry_day(entry)
             b = sessions[day.isoformat() if day else ""]
-            b["sets"] += 1
-            b["reps"] += reps
-            b["volume_kg"] += reps * weight
-            b["top_weight"] = max(b["top_weight"], weight)
+            _accumulate(b, reps, weight)
             b["entries"].append(
                 {
                     "id": entry.get("id"),
@@ -265,7 +296,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             "sessions": [
                 {
                     "date": d,
-                    **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in s.items()},
+                    **_project(s, ["volume", "sets", "reps", "top_weight"]),
+                    "entries": s["entries"],
                 }
                 for d, s in sorted(sessions.items())
             ],
@@ -417,17 +449,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         b_to = a_from - timedelta(days=1 + gap_days)
         b_from = b_to - timedelta(days=window_days - 1)
 
-        def _start(d: date) -> datetime:
-            return datetime.combine(d, time.min)
-
-        def _end_exclusive(d: date) -> datetime:
-            return datetime.combine(d + timedelta(days=1), time.min)
-
+        a_since, a_until = day_bounds(a_from, a_to)
+        b_since, b_until = day_bounds(b_from, b_to)
         # Two range queries instead of one spanning the gap — when gap_days
         # is non-trivial we'd otherwise fetch (and discard) the gap window.
         logs_a, logs_b = await asyncio.gather(
-            _fetch_logs(api, limit=5000, since=_start(a_from), until=_end_exclusive(a_to)),
-            _fetch_logs(api, limit=5000, since=_start(b_from), until=_end_exclusive(b_to)),
+            _fetch_logs(api, limit=5000, since=a_since, until=a_until),
+            _fetch_logs(api, limit=5000, since=b_since, until=b_until),
         )
 
         ex_cache = await _load_ex_meta(api, logs_a + logs_b, group_by)
@@ -452,35 +480,6 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
 
         all_groups: set[tuple | None] = set(per_period["a"].keys()) | set(per_period["b"].keys())
 
-        def _delta(a: dict[str, float], b: dict[str, float]) -> dict[str, Any]:
-            out: dict[str, Any] = {}
-            if "volume" in selected:
-                out["volume_kg"] = round(a["volume_kg"] - b["volume_kg"], 2)
-            if "sets" in selected:
-                out["sets"] = a["sets"] - b["sets"]
-            if "reps" in selected:
-                out["reps"] = a["reps"] - b["reps"]
-            if "top_weight" in selected:
-                out["top_weight"] = round(a["top_weight"] - b["top_weight"], 2)
-            if "est_1rm" in selected:
-                out["est_1rm"] = round(a["est_1rm"] - b["est_1rm"], 2)
-            return out
-
-        def _delta_pct(a: dict[str, float], b: dict[str, float]) -> dict[str, Any]:
-            out: dict[str, Any] = {}
-            for short, full in (
-                ("volume", "volume_kg"),
-                ("sets", "sets"),
-                ("reps", "reps"),
-                ("top_weight", "top_weight"),
-                ("est_1rm", "est_1rm"),
-            ):
-                if short not in selected:
-                    continue
-                base = b[full]
-                out[full] = None if base == 0 else round(((a[full] - base) / base) * 100, 1)
-            return out
-
         comparison: list[dict[str, Any]] = []
         for group in all_groups:
             a = per_period["a"].get(group) or _new_metric_bucket()
@@ -490,8 +489,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 row["group"] = {"key": group[0], "label": group[1]}
             row["a"] = _project(a, selected)
             row["b"] = _project(b, selected)
-            row["delta"] = _delta(a, b)
-            row["delta_pct"] = _delta_pct(a, b)
+            row["delta"] = _delta(a, b, selected)
+            row["delta_pct"] = _delta_pct(a, b, selected)
             comparison.append(row)
         comparison.sort(
             key=lambda r: abs(r["delta"].get("volume_kg") or 0),
@@ -505,7 +504,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             "metrics": selected,
             "total_a": _project(totals["a"], selected),
             "total_b": _project(totals["b"], selected),
-            "total_delta": _delta(totals["a"], totals["b"]),
-            "total_delta_pct": _delta_pct(totals["a"], totals["b"]),
+            "total_delta": _delta(totals["a"], totals["b"], selected),
+            "total_delta_pct": _delta_pct(totals["a"], totals["b"], selected),
             "comparison": comparison,
         }

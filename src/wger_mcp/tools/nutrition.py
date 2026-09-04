@@ -38,7 +38,7 @@ from wger_api_client.api.userprofile import userprofile_partial_update, userprof
 from wger_api_client.api.weightentry import weightentry_list
 from wger_api_client.client import AuthenticatedClient
 from wger_api_client.errors import UnexpectedStatus
-from wger_api_client.types import UNSET
+from wger_api_client.types import UNSET, Unset
 
 from ..api_client import paginate
 from ..config import Settings
@@ -53,6 +53,9 @@ from .common import (
     at_noon,
     bad_request,
     opt,
+    opt_decimal,
+    opt_int,
+    opt_uuid,
     require_fields,
 )
 
@@ -61,6 +64,16 @@ _INGREDIENT_CONCURRENCY = 8
 # Model field limits, so the caller is told before the server refuses
 PLAN_DESCRIPTION_MAX = 80
 MEAL_NAME_MAX = 25
+
+
+def _goal(value: float | None) -> int | Unset:
+    """A plan goal for wger's integer field, or ``UNSET`` when not being set.
+
+    The tools take the goals as floats — a caller computing a target from
+    bodyweight has no reason to round first — while wger stores whole
+    kcal and grams.
+    """
+    return UNSET if value is None else int(value)
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
@@ -106,13 +119,11 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             only_logging=only_logging,
             start=opt(start),
             end=opt(end),
-            goal_fiber=int(goal_fiber) if goal_fiber is not None else UNSET,
-            goal_energy=int(goal_energy) if goal_energy is not None else UNSET,
-            goal_protein=int(goal_protein) if goal_protein is not None else UNSET,
-            goal_carbohydrates=(
-                int(goal_carbohydrates) if goal_carbohydrates is not None else UNSET
-            ),
-            goal_fat=int(goal_fat) if goal_fat is not None else UNSET,
+            goal_fiber=_goal(goal_fiber),
+            goal_energy=_goal(goal_energy),
+            goal_protein=_goal(goal_protein),
+            goal_carbohydrates=_goal(goal_carbohydrates),
+            goal_fat=_goal(goal_fat),
         )
         created = await nutritionplan_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -140,13 +151,11 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             only_logging=opt(only_logging),
             start=opt(start),
             end=opt(end),
-            goal_fiber=int(goal_fiber) if goal_fiber is not None else UNSET,
-            goal_energy=int(goal_energy) if goal_energy is not None else UNSET,
-            goal_protein=int(goal_protein) if goal_protein is not None else UNSET,
-            goal_carbohydrates=(
-                int(goal_carbohydrates) if goal_carbohydrates is not None else UNSET
-            ),
-            goal_fat=int(goal_fat) if goal_fat is not None else UNSET,
+            goal_fiber=_goal(goal_fiber),
+            goal_energy=_goal(goal_energy),
+            goal_protein=_goal(goal_protein),
+            goal_carbohydrates=_goal(goal_carbohydrates),
+            goal_fat=_goal(goal_fat),
         )
         require_fields(body)
         updated = await nutritionplan_partial_update.asyncio(
@@ -218,9 +227,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             meal=as_uuid(recipe_id, "recipe_id"),
             ingredient=as_int(ingredient_id, "ingredient_id"),
             amount=as_decimal(amount_g),
-            weight_unit=(
-                as_int(weight_unit_id, "weight_unit_id") if weight_unit_id is not None else UNSET
-            ),
+            weight_unit=opt_int(weight_unit_id, "weight_unit_id"),
         )
         item = await mealitem_create.asyncio(client=api, body=body)
         return item.to_dict()
@@ -303,7 +310,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             ingredient=ingredient,
             amount=as_decimal(amount_g),
             datetime_=opt(at_noon(when)),
-            meal=as_uuid(meal_id, "meal_id") if meal_id is not None else UNSET,
+            meal=opt_uuid(meal_id, "meal_id"),
             weight_unit=opt(unit),
         )
         entry = await nutritiondiary_create.asyncio(client=api, body=body)
@@ -339,14 +346,12 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 else as_int(weight_unit_id, "weight_unit_id")
             )
         body = api_models.PatchedLogItemRequest(
-            amount=as_decimal(amount_g) if amount_g is not None else UNSET,
+            amount=opt_decimal(amount_g),
             datetime_=opt(at_noon(when)),
-            ingredient=(
-                as_int(ingredient_id, "ingredient_id") if ingredient_id is not None else UNSET
-            ),
-            meal=as_uuid(meal_id, "meal_id") if meal_id is not None else UNSET,
+            ingredient=opt_int(ingredient_id, "ingredient_id"),
+            meal=opt_uuid(meal_id, "meal_id"),
             weight_unit=opt(unit),
-            plan=opt(as_uuid(plan_id, "plan_id") if plan_id is not None else None),
+            plan=opt_uuid(plan_id, "plan_id"),
         )
         require_fields(body)
         updated = await nutritiondiary_partial_update.asyncio(

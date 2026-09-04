@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import SecretStr
+
 from ..config import AuthStrategy, Settings
 from .asfacade import (
     AS_METADATA_PATH,
@@ -66,6 +68,11 @@ def _resolve_endpoints(s: Settings) -> OidcEndpoints:
     )
 
 
+def _secret(value: SecretStr | None) -> str:
+    """Unwrap a secret setting. str() on a SecretStr yields the mask, not the value."""
+    return value.get_secret_value() if value is not None else ""
+
+
 def build_auth_middleware(settings: Settings) -> tuple[type, dict[str, Any]]:
     """Pick an inbound auth middleware class + kwargs based on settings."""
     s = settings
@@ -73,7 +80,7 @@ def build_auth_middleware(settings: Settings) -> tuple[type, dict[str, Any]]:
         case AuthStrategy.none:
             return NoAuthMiddleware, {}
         case AuthStrategy.static_token:
-            return StaticTokenMiddleware, {"token": str(s.mcp_static_token)}
+            return StaticTokenMiddleware, {"token": _secret(s.mcp_static_token)}
         case AuthStrategy.oidc:
             jwks_uri = _resolve_endpoints(s).jwks_uri
             return OidcAuthMiddleware, {
@@ -123,12 +130,12 @@ def build_token_provider(settings: Settings) -> WgerTokenProvider:
     if s.mcp_auth in (AuthStrategy.none, AuthStrategy.static_token):
         # Both single-user strategies call wger with the same personal API key;
         # they differ only in whether inbound requests are authenticated.
-        return WgerTokenProvider(dev_token=s.wger_dev_token)
+        return WgerTokenProvider(dev_token=_secret(s.wger_dev_token))
     token_endpoint = _resolve_endpoints(s).token_endpoint
     exchanger = TokenExchanger(
         token_endpoint=token_endpoint,
         client_id=str(s.oidc_client_id),
-        client_secret=str(s.oidc_client_secret),
+        client_secret=_secret(s.oidc_client_secret),
         wger_audience=str(s.wger_oidc_audience),
         provider_token_url=s.provider_token_url,
         provider=s.wger_allauth_provider,

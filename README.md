@@ -369,8 +369,8 @@ Anything tracked with a tape measure. Categories are the user's own (Waist, Ches
 
 | Tool | Description |
 |------|-------------|
-| `lookup_food_by_barcode(barcode, language?)` | Resolve an EAN/UPC/GTIN on Open Food Facts. Returns the localised name + ingredients (when present), macros per 100 g, and a normalised `wger_ingredient_payload` (informational). Salt→sodium conversion applied automatically |
-| `lookup_foods_by_barcodes(barcodes[], language?)` | Batch variant — concurrent fetches (capped at 4 in flight) with one-shot retry on 429. Returns map keyed by barcode |
+| `lookup_food_by_barcode(barcode, language?)` | Resolve an EAN/UPC/GTIN on Open Food Facts. Returns the localised name + ingredients (when present) and macros per 100 g, with a one-shot retry on 429. Salt→sodium conversion applied automatically |
+| `lookup_foods_by_barcodes(barcodes[], language?)` | Batch variant — concurrent fetches (capped at 4 in flight). Returns map keyed by barcode |
 
 > Use these when you have a barcode — far more accurate than wger name search. Coverage is good for branded packaged goods and thin for supermarket private-labels, and it varies a lot by country. For items missing on OFF, the response includes a `suggestion` URL to add them — additions flow back into wger via the next ingredient-sync.
 >

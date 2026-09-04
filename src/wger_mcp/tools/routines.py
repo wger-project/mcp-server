@@ -125,6 +125,8 @@ from .common import (
     bad_request,
     language_id_resolver,
     opt,
+    opt_decimal,
+    opt_int,
     profile_weight_unit,
     require_fields,
     weight_unit_name,
@@ -384,6 +386,21 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
         for entry in sequence or []:
             if entry.date != target:
                 continue
+            if entry.day is None:
+                # A date the routine covers but puts no day on. fit_in_week pads
+                # the rest of the week with these, so they are the common case,
+                # not the edge: a three-day split leaves four of them per week.
+                return {
+                    "routine_id": routine_id,
+                    "date": entry.date.isoformat(),
+                    "iteration": entry.iteration,
+                    "label": entry.label,
+                    "day_id": None,
+                    "day_name": None,
+                    "day_description": None,
+                    "is_rest_day": True,
+                    "planned": [],
+                }
             planned: list[dict[str, Any]] = [
                 {
                     "slot_entry_id": cfg.slot_entry_id,
@@ -703,7 +720,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         body = api_models.PatchedSlotRequest(
             order=opt(order),
             comment=opt(comment),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            day=opt_int(day_id, "day_id"),
         )
         require_fields(body)
         updated = await slot_partial_update.asyncio(
@@ -737,19 +754,15 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
                 f"unknown entry type '{entry_type}'; expected one of {', '.join(EXERCISE_TYPES)}"
             )
         body = api_models.PatchedSlotEntryRequest(
-            exercise=(as_int(exercise_id, "exercise_id") if exercise_id is not None else UNSET),
+            exercise=opt_int(exercise_id, "exercise_id"),
             order=opt(order),
             comment=opt(comment),
             repetition_unit=opt(as_repetition_unit(repetition_unit, allow_id=True)),
             weight_unit=opt(as_weight_unit(weight_unit, allow_id=True)),
-            slot=opt(as_int(slot_id, "slot_id") if slot_id is not None else None),
+            slot=opt_int(slot_id, "slot_id"),
             type_=opt(entry_type),
-            repetition_rounding=opt(
-                as_decimal(repetition_rounding) if repetition_rounding is not None else None
-            ),
-            weight_rounding=opt(
-                as_decimal(weight_rounding) if weight_rounding is not None else None
-            ),
+            repetition_rounding=opt_decimal(repetition_rounding),
+            weight_rounding=opt_decimal(weight_rounding),
         )
         require_fields(body)
         updated = await slot_entry_partial_update.asyncio(
@@ -895,12 +908,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             repetition_unit=opt(as_repetition_unit(repetition_unit, allow_id=True)),
             weight_unit=opt(unit),
             type_=entry_type,
-            repetition_rounding=opt(
-                as_decimal(repetition_rounding) if repetition_rounding is not None else None
-            ),
-            weight_rounding=opt(
-                as_decimal(weight_rounding) if weight_rounding is not None else None
-            ),
+            repetition_rounding=opt_decimal(repetition_rounding),
+            weight_rounding=opt_decimal(weight_rounding),
         )
         created = await slot_entry_create.asyncio(client=api, body=body)
         return created.to_dict()
@@ -993,7 +1002,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         entry_type: str = "normal",
     ) -> dict[str, Any]:
         """High-level convenience: create slot + slot-entry + sets/reps configs
-        in one call. Returns the created ids. Partial failures are reported in
+        in one call. Returns the created ids under the names the follow-up
+        tools take (slot_id, slot_entry_id, sets_config_id, ...).
+        Partial failures are reported in
         the response; if the exercise cannot be attached, the empty slot is
         deleted again, because nothing renders it and it cannot be found later.
 
@@ -1048,7 +1059,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             )
         except (UnexpectedStatus, httpx.HTTPError) as exc:
             return api_err(exc) | {"stage": "slot"}
-        result["slot"] = {"id": slot.id}
+        result["slot_id"] = slot.id
 
         try:
             entry = await slot_entry_create.asyncio(
@@ -1067,9 +1078,9 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             # cannot see it to clean it up. Undo it rather than leave it behind.
             rolled_back = await _discard_slot(slot.id)
             if rolled_back:
-                result.pop("slot")
+                result.pop("slot_id")
             return result | api_err(exc) | {"stage": "slot-entry", "slot_rolled_back": rolled_back}
-        result["slot_entry"] = {"id": entry.id}
+        result["slot_entry_id"] = entry.id
 
         # The configs only depend on the entry, so they go out together
         async def _config(kind: str, value: int | str) -> Any:
@@ -1094,7 +1105,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             if isinstance(outcome, BaseException):
                 failed = failed or (kind, outcome)
                 continue
-            result[f"{kind}_config"] = {"id": outcome.id}
+            result[f"{kind}_config_id"] = outcome.id
         if failed is not None:
             kind, exc = failed
             if not isinstance(exc, UnexpectedStatus | httpx.HTTPError):
