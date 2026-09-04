@@ -16,7 +16,7 @@ from wger_api_client.client import AuthenticatedClient
 from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.types import UNSET, Unset
 
-from ..api_client import paginate
+from ..api_client import REQUEST_TIMEOUT_SECONDS, paginate
 
 T = TypeVar("T")
 
@@ -72,7 +72,28 @@ def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
         except ValueError:
             detail = exc.content.decode(errors="replace")
         return {"error": True, "status": exc.status_code, "detail": detail}
-    return {"error": True, "status": 503, "detail": f"wger is unreachable: {exc}"}
+    return {"error": True, "status": 503, "detail": _transport_detail(exc)}
+
+
+def _transport_detail(exc: httpx.HTTPError) -> str:
+    """Say which way the call failed, in words the operator can act on.
+
+    httpx raises most transport errors with an empty message — ``str()`` on a
+    ReadTimeout is ``''`` — so without the type the reason is simply missing,
+    and a timeout reads as an unreachable server. The two need different
+    answers: one is a slow query or an undersized instance, the other a wrong
+    URL or a server that is down.
+    """
+    if isinstance(exc, httpx.ConnectTimeout):
+        return f"wger did not accept a connection within {REQUEST_TIMEOUT_SECONDS:g}s"
+    if isinstance(exc, httpx.TimeoutException):
+        # Read, write or pool: the connection stood, the answer did not arrive.
+        return (
+            f"wger did not answer within {REQUEST_TIMEOUT_SECONDS:g}s. The request "
+            f"reached it, so look for a slow query or an overloaded instance"
+        )
+    reason = str(exc).strip()
+    return f"wger is unreachable: {reason or type(exc).__name__}"
 
 
 def opt(value: T | None) -> T | Unset:

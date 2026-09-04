@@ -5,6 +5,17 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Fixed:** a wger that answers too slowly is no longer reported as
+  unreachable, and a transport failure always names its reason. httpx raises
+  most of these with an empty message — `str()` on a ReadTimeout is `''` — so
+  the detail read `wger is unreachable: ` with nothing after the colon: true
+  about neither the cause nor the server, since the request had in fact
+  arrived. A read timeout now says wger did not answer within the 20s budget
+  and points at a slow query; a connect timeout says the connection itself was
+  never accepted; and anything else falls back to the exception's type rather
+  than to an empty string. The timeout is a named constant so the message
+  quotes the budget actually in force.
+
 * **Fixed:** `get_workout_for_date` no longer fails on a date the routine
   covers but schedules no day on. wger returns one sequence entry per calendar
   day, and `fit_in_week` pads the rest of the week with entries whose `day` is

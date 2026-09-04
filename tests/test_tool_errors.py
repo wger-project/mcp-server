@@ -68,6 +68,45 @@ async def test_transport_failure_becomes_an_error_dict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_read_timeout_is_not_reported_as_unreachable() -> None:
+    """The server answered the connection and then took too long. Calling that
+    "unreachable" sends the operator after the URL and the firewall, when the
+    request in fact arrived."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise httpx.ReadTimeout("")
+
+    out = await tool()
+    assert out["status"] == 503
+    assert "did not answer within 20s" in out["detail"]
+    assert "unreachable" not in out["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_connect_timeout_names_the_budget_it_spent() -> None:
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise httpx.ConnectTimeout("")
+
+    out = await tool()
+    assert "did not accept a connection within 20s" in out["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_silent_transport_error_still_names_its_kind() -> None:
+    """httpx raises these with an empty message, which used to leave the detail
+    as a bare "wger is unreachable: " — true, but useless."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise httpx.RemoteProtocolError("")
+
+    out = await tool()
+    assert out["detail"] == "wger is unreachable: RemoteProtocolError"
+
+
+@pytest.mark.asyncio
 async def test_list_tools_wrap_the_error_in_a_list() -> None:
     @api_list_tool
     async def tool() -> list[dict[str, Any]]:
