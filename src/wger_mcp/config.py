@@ -39,6 +39,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
+from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -255,6 +256,17 @@ class Settings(BaseSettings):
     # ``ingredients_text_<lang>``) are requested and preferred. Per-call
     # arguments always win over this default.
     default_language: str = "en"
+
+    # ---------- log-weight guard ----------
+    # Loading steps, per weight-unit name, that log_set and update_workout_log
+    # treat as the valid grid. Empty (the default) leaves the guard OFF: every
+    # weight the wger API accepts is written as given. Set e.g. {"lb": "2.5"}
+    # for a gym whose barbells, dumbbells and plate machines all step in 2.5 lb,
+    # and a weight off that grid — far more often a garbled report than a real
+    # load — is refused until it is confirmed or the exercise has shown an
+    # off-grid value before (a weight-stack machine, learned per exercise). A
+    # slot entry that pins its own weight_rounding overrides the default there.
+    weight_grid: dict[str, Decimal] = Field(default_factory=dict)
 
     @field_validator("mcp_oidc_algorithms", mode="after")
     @classmethod

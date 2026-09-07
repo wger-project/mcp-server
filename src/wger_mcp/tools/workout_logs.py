@@ -7,11 +7,13 @@ longer exists on wger >= 2.6.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from wger_api_client import models as api_models
+from wger_api_client.api.slot_entry import slot_entry_retrieve
 from wger_api_client.api.workoutlog import (
     workoutlog_create,
     workoutlog_destroy,
@@ -38,6 +40,7 @@ from .common import (
     opt,
     profile_weight_unit,
     require_fields,
+    weight_unit_name,
 )
 
 # wger stores repetitions as decimal(6, 2), so this is the field's own ceiling
@@ -48,6 +51,84 @@ REPS_MAX = 9999
 # PositiveIntegerField upstream. Two hours is well past any real set, and a
 # four-digit typo is far more likely than a genuine longer pause.
 REST_MAX = 7200
+
+def _off_grid(weight: float, grid: Decimal) -> bool:
+    """True when a weight is not a multiple of the loading step ``grid``."""
+    return Decimal(str(weight)) % grid != 0
+
+
+async def _slot_weight_rounding(
+    api: AuthenticatedClient, slot_entry_id: str
+) -> Decimal | None:
+    """The loading step the plan pins for this slot, if any. It overrides the
+    configured default, so a barbell slot rounding to 5 and a fractional-plate
+    slot rounding to 1.25 are each judged on their own terms rather than a flat
+    guess."""
+    entry = await slot_entry_retrieve.asyncio(
+        id=as_int(slot_entry_id, "slot_entry_id"), client=api
+    )
+    rounding = getattr(entry, "weight_rounding", None)
+    return Decimal(rounding) if isinstance(rounding, str) else None
+
+
+async def _exercise_has_off_grid_history(
+    api: AuthenticatedClient, exercise_id: int, unit_id: int | None, grid: Decimal
+) -> bool:
+    """Whether this exercise already carries an off-grid weight in this unit —
+    the signature of a weight-stack machine, whose odd readings (16.5, 21.5 lb)
+    are all real. So the first off-grid value is questioned and the rest, once
+    one is on record, are trusted without a prompt each time."""
+    rows = await paginate(
+        workoutlog_list.asyncio,
+        client=api,
+        limit=200,
+        exercise=exercise_id,
+        ordering="-date",
+    )
+    return any(
+        row.get("weight") is not None
+        and row.get("weight_unit") == unit_id
+        and _off_grid(row["weight"], grid)
+        for row in rows
+    )
+
+
+async def _check_weight(
+    api: AuthenticatedClient,
+    settings: Settings,
+    *,
+    exercise_id: str,
+    weight: float,
+    unit_id: int | None,
+    slot_entry_id: str | None,
+    confirm_weight: bool,
+) -> None:
+    """Refuse a weight off the gym's configured loading grid that this exercise
+    has not shown before, so a garbled or invented number is confirmed before it
+    is written. Off entirely unless settings.weight_grid names a step for the
+    unit; a slot that pins its own weight_rounding overrides that step;
+    bodyweight (0), on-grid loads, a confirmed call, and an exercise with
+    off-grid history all pass."""
+    grid = settings.weight_grid.get(weight_unit_name(unit_id)) if unit_id is not None else None
+    if confirm_weight or grid is None or weight == 0 or not _off_grid(weight, grid):
+        return
+    if slot_entry_id is not None:
+        rounding = await _slot_weight_rounding(api, slot_entry_id)
+        if rounding is not None and not _off_grid(weight, rounding):
+            return
+    if await _exercise_has_off_grid_history(
+        api, as_int(exercise_id, "exercise_id"), unit_id, grid
+    ):
+        return
+    unit = weight_unit_name(unit_id)
+    lo = (Decimal(str(weight)) // grid) * grid
+    raise ToolInputError(
+        f"{weight:g} {unit} is off this gym's {grid:g} {unit} loading grid and "
+        f"has not been logged for this exercise before. If it is a weight-stack "
+        f"or cable reading, re-send with confirm_weight=true. Otherwise confirm "
+        f"the exact weight with the trainee — the nearest grid loads are {lo:g} "
+        f"and {lo + grid:g} {unit} — and log that."
+    )
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
@@ -71,9 +152,19 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         rest_target: Annotated[int | None, Field(ge=0, le=REST_MAX)] = None,
         session_id: str | None = None,
         next_log_id: str | None = None,
+        confirm_weight: bool = False,
     ) -> dict[str, Any]:
         """Log a completed set (workoutlog). Without a date, wger stamps the
         entry with the current time; a bare date lands at 12:00.
+
+        When the server is configured with a loading grid for the weight's unit
+        (settings.weight_grid, off by default), a weight off that grid that the
+        exercise has not shown before is refused, not written: it is far more
+        often a garbled report ("49ers" heard as 49) than a real load. Confirm
+        the exact number with the trainee, then pass confirm_weight=true to log
+        a genuine weight-stack or cable reading (16.5, 21.5, ...); the exercise
+        then carries an off-grid value, so its later odd readings pass on their
+        own.
 
         exercise_id is the movement performed, not always the one the plan
         names. For a substitution — machine occupied, equipment missing — pass
@@ -129,6 +220,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             )
         unit = as_weight_unit(
             weight_unit if weight_unit is not None else await profile_weight_unit(api)
+        )
+        await _check_weight(
+            api,
+            settings,
+            exercise_id=exercise_id,
+            weight=weight,
+            unit_id=unit,
+            slot_entry_id=slot_entry_id,
+            confirm_weight=confirm_weight,
         )
         body = api_models.WorkoutLogRequest(
             exercise=as_int(exercise_id, "exercise_id"),
@@ -200,12 +300,18 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         iteration: Annotated[int | None, Field(ge=1, le=1000)] = None,
         session_id: str | None = None,
         next_log_id: str | None = None,
+        confirm_weight: bool = False,
     ) -> dict[str, Any]:
         """Patch a workout log entry. Only provided fields are sent.
 
         weight_unit ('kg' or 'lb') is only sent when given, so correcting reps
         alone leaves the recorded unit untouched. The same holds for reps_unit
         and for every *_target field; see log_set for what they mean.
+
+        A corrected weight is grid-checked exactly as log_set checks a new one,
+        so a garble does not slip in through the fix path; confirm_weight=true
+        writes an off-grid value the same way. The exercise and unit come from
+        the stored log when not supplied.
 
         routine_id / slot_entry_id / iteration attach a set that was logged
         freestanding to the plan it actually came from — the repair for a
@@ -217,6 +323,23 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         otherwise means deleting the entry and logging it again.
         """
         log = as_uuid(log_id, "log_id")
+        if weight is not None and settings.weight_grid:
+            ex, unit = exercise_id, as_weight_unit(weight_unit)
+            if ex is None or unit is None:
+                stored = await workoutlog_retrieve.asyncio(id=log, client=api)
+                if ex is None:
+                    ex = str(stored.exercise)
+                if unit is None:
+                    unit = stored.weight_unit if isinstance(stored.weight_unit, int) else None
+            await _check_weight(
+                api,
+                settings,
+                exercise_id=ex,
+                weight=weight,
+                unit_id=unit,
+                slot_entry_id=slot_entry_id,
+                confirm_weight=confirm_weight,
+            )
         body = api_models.PatchedWorkoutLogRequest(
             repetitions=opt(as_decimal(reps) if reps is not None else None),
             repetitions_unit=opt(as_repetition_unit(reps_unit)),
