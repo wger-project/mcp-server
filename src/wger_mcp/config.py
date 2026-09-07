@@ -256,6 +256,15 @@ class Settings(BaseSettings):
     # arguments always win over this default.
     default_language: str = "en"
 
+    # ---------- duplicate-log guard ----------
+    # Seconds within which log_set refuses a row identical (exercise, weight,
+    # reps, unit) to one it just wrote. 0 (the default) leaves the guard OFF.
+    # Catches one physical set reported twice — a trainee's message split in
+    # two, each half driving its own logging turn — while staying far below any
+    # real inter-set rest, so a genuine straight-set repeat minutes later
+    # passes. confirm_duplicate=true logs a genuinely separate set anyway.
+    duplicate_window_seconds: int = Field(default=0, ge=0)
+
     @field_validator("mcp_oidc_algorithms", mode="after")
     @classmethod
     def _normalize_algs(cls, v: list[str]) -> list[str]:

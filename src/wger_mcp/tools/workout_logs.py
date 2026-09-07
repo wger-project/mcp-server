@@ -7,6 +7,7 @@ longer exists on wger >= 2.6.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -50,6 +51,68 @@ REPS_MAX = 9999
 REST_MAX = 7200
 
 
+def _uuid7_ms(log_id: Any) -> int | None:
+    """Creation time in unix ms read out of a UUIDv7 row id, or None for any
+    other id shape. wger's ``date`` field is day-granular, so the id is the
+    only clock fine enough to see two writes seconds apart."""
+    s = str(log_id).replace("-", "")
+    if len(s) != 32 or s[12] != "7":
+        return None
+    try:
+        return int(s[:12], 16)
+    except ValueError:
+        return None
+
+
+async def _check_duplicate(
+    api: AuthenticatedClient,
+    settings: Settings,
+    *,
+    exercise_id: str,
+    reps: float,
+    weight: float,
+    unit_id: int | None,
+    confirm_duplicate: bool,
+) -> None:
+    """Refuse a row identical (exercise, weight, reps, unit) to one written
+    moments ago: one physical set reported twice — typically a trainee message
+    split in two, each half driving its own logging turn — not two sets. Off
+    unless settings.duplicate_window_seconds is set; the window must sit below
+    any real inter-set rest, so a genuine repeat minutes later passes."""
+    window = settings.duplicate_window_seconds
+    if not window or confirm_duplicate:
+        return
+    resp = await workoutlog_list.asyncio(
+        client=api,
+        limit=50,
+        exercise=as_int(exercise_id, "exercise_id"),
+        ordering="-date",
+    )
+    rows = [r.to_dict() for r in resp.results] if resp and resp.results else []
+    cutoff_ms = datetime.now().timestamp() * 1000 - window * 1000
+    for row in rows:
+        ms = _uuid7_ms(row.get("id"))
+        if ms is None or ms < cutoff_ms or row.get("weight_unit") != unit_id:
+            continue
+        try:
+            same = Decimal(str(row.get("weight"))) == Decimal(str(weight)) and Decimal(
+                str(row.get("repetitions"))
+            ) == Decimal(str(reps))
+        except InvalidOperation:
+            continue
+        if not same:
+            continue
+        age = int(datetime.now().timestamp() - ms / 1000)
+        raise ToolInputError(
+            f"an identical set ({weight:g} x {reps:g}) was already logged {age}s "
+            f"ago as {row['id']}. If the trainee reported the SAME set again — "
+            f"for example a report split across two messages — do not log it "
+            f"twice: it is already recorded; answer from that row. Only for a "
+            f"genuinely separate set completed within {window}s, re-send with "
+            f"confirm_duplicate=true."
+        )
+
+
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_tool
@@ -71,9 +134,18 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         rest_target: Annotated[int | None, Field(ge=0, le=REST_MAX)] = None,
         session_id: str | None = None,
         next_log_id: str | None = None,
+        confirm_duplicate: bool = False,
     ) -> dict[str, Any]:
         """Log a completed set (workoutlog). Without a date, wger stamps the
         entry with the current time; a bare date lands at 12:00.
+
+        When the server is configured with a duplicate window
+        (settings.duplicate_window_seconds, off by default), a row identical to
+        one written seconds ago is refused, not written: that is one physical
+        set reported twice — a trainee's message split in two — far more often
+        than two real sets back to back. If it truly was a separate set, re-send
+        with confirm_duplicate=true; if it was the same set, it is already
+        logged, so answer from the existing row instead of logging.
 
         exercise_id is the movement performed, not always the one the plan
         names. For a substitution — machine occupied, equipment missing — pass
@@ -129,6 +201,15 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             )
         unit = as_weight_unit(
             weight_unit if weight_unit is not None else await profile_weight_unit(api)
+        )
+        await _check_duplicate(
+            api,
+            settings,
+            exercise_id=exercise_id,
+            reps=reps,
+            weight=weight,
+            unit_id=unit,
+            confirm_duplicate=confirm_duplicate,
         )
         body = api_models.WorkoutLogRequest(
             exercise=as_int(exercise_id, "exercise_id"),
