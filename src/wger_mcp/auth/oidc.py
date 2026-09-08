@@ -178,6 +178,21 @@ class OidcAuthMiddleware:
             )
             return
 
+        # `sub` is the only claim OIDC guarantees to be unique and stable per
+        # user, and it keys the outbound credential cache. Falling back to the
+        # username claim or a constant would let two callers share one wger
+        # credential; preferred_username in particular need be neither unique
+        # nor stable (OIDC Core 5.1).
+        subject = claims.get("sub")
+        if not isinstance(subject, str) or not subject:
+            log.warning("oidc token rejected: missing or malformed sub claim")
+            await reply_unauthorized(
+                scope, receive, send,
+                reason="invalid token: missing sub claim",
+                www_authenticate=self._www_authenticate(request),
+            )
+            return
+
         username = claims.get(self._username_claim)
         if self._allowed and username not in self._allowed:
             log.warning("user %r not in allowed list", username)
@@ -188,7 +203,6 @@ class OidcAuthMiddleware:
             )
             return
 
-        subject = str(claims.get("sub") or username or "unknown")
         identity = Identity(
             subject=subject,
             username=username,

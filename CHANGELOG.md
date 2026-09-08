@@ -5,6 +5,18 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* **Security:** an OIDC bearer token must now carry a non-empty string `sub`
+  claim, or the request is rejected with 401. Previously a validly signed token
+  without `sub` was accepted and its identity fell back to the username claim,
+  or to the constant `unknown` when that was absent too. The outbound wger
+  credential is cached per identity, so two such callers would have shared one
+  cache entry, and the second would have acted with the first caller's wger
+  JWT. Common identity providers always put `sub` in access tokens, so a
+  typical deployment was not affected; the gap depended on an IdP that omits
+  it, together with the default empty allowlist. The username claim still
+  serves the allowlist and display, but never keys the credential cache.
+  Reported privately by WinstonRedGuard (github.com/WRG-11).
+
 * **Fixed:** a wger that answers too slowly is no longer reported as
   unreachable, and a transport failure always names its reason. httpx raises
   most of these with an empty message — `str()` on a ReadTimeout is `''` — so

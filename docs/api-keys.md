@@ -30,6 +30,8 @@ against the IdP's JWKS.
 
 Relevant settings:
 
+- The token must carry a `sub` claim; it identifies the caller and keys the
+  per-user wger credential cache. Tokens without one are rejected.
 - `MCP_OIDC_AUDIENCE` — if set, the token's `aud` (or `azp`) must match.
 - `MCP_OIDC_USERNAME_CLAIM` — which claim names the user, default
   `preferred_username`.
