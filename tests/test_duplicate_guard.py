@@ -76,12 +76,18 @@ def _uuid7(age_seconds: float) -> str:
     return f"{h[:8]}-{h[8:12]}-7000-8000-000000000000"
 
 
-def _row(age_seconds: float, weight: str = "150.00", reps: str = "5.00") -> dict[str, Any]:
+def _row(
+    age_seconds: float,
+    weight: str = "150.00",
+    reps: str = "5.00",
+    slot_entry: int | None = None,
+) -> dict[str, Any]:
     return {
         "id": _uuid7(age_seconds),
         "weight": weight,
         "repetitions": reps,
         "weight_unit": 2,
+        "slot_entry": slot_entry,
     }
 
 
@@ -154,3 +160,30 @@ async def test_non_uuid7_id_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     await _log(mcp)
 
     assert create.called
+
+
+@pytest.mark.asyncio
+async def test_other_side_of_a_per_side_movement_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left and right of a per-side exercise carry identical weight+reps but
+    different slots; the second side must not be refused as a duplicate."""
+    mcp = _register()
+    create = _wire(monkeypatch, [_row(age_seconds=10, slot_entry=106)])
+    await _log(mcp, slot_entry_id="105", routine_id="6")
+
+    assert create.called
+
+
+@pytest.mark.asyncio
+async def test_same_slot_in_window_is_still_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The split-message race re-sends the SAME set — same slot — so a matching
+    slot within the window is still caught."""
+    mcp = _register()
+    create = _wire(monkeypatch, [_row(age_seconds=10, slot_entry=105)])
+    out = await _log(mcp, slot_entry_id="105", routine_id="6")
+
+    assert not create.called
+    assert "already logged" in json.dumps(out)

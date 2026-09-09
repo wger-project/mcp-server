@@ -72,16 +72,24 @@ async def _check_duplicate(
     reps: float,
     weight: float,
     unit_id: int | None,
+    slot_entry_id: str | None,
     confirm_duplicate: bool,
 ) -> None:
-    """Refuse a row identical (exercise, weight, reps, unit) to one written
-    moments ago: one physical set reported twice — typically a trainee message
-    split in two, each half driving its own logging turn — not two sets. Off
-    unless settings.duplicate_window_seconds is set; the window must sit below
-    any real inter-set rest, so a genuine repeat minutes later passes."""
+    """Refuse a row identical (exercise, weight, reps, unit, slot) to one
+    written moments ago: one physical set reported twice — typically a trainee
+    message split in two, each half driving its own logging turn — not two sets.
+    Off unless settings.duplicate_window_seconds is set; the window must sit
+    below any real inter-set rest, so a genuine repeat minutes later passes.
+
+    The slot is part of the identity so a per-side movement (Bulgarian split,
+    Pallof, Copenhagen) does not trip it: its left and right entries carry the
+    same weight and reps but different slot_entry_id, whereas the split-message
+    race that this guards against re-sends the SAME set — same slot — so the
+    real case is still caught."""
     window = settings.duplicate_window_seconds
     if not window or confirm_duplicate:
         return
+    slot = as_int(slot_entry_id, "slot_entry_id") if slot_entry_id is not None else None
     resp = await workoutlog_list.asyncio(
         client=api,
         limit=50,
@@ -93,6 +101,8 @@ async def _check_duplicate(
     for row in rows:
         ms = _uuid7_ms(row.get("id"))
         if ms is None or ms < cutoff_ms or row.get("weight_unit") != unit_id:
+            continue
+        if row.get("slot_entry") != slot:
             continue
         try:
             same = Decimal(str(row.get("weight"))) == Decimal(str(weight)) and Decimal(
@@ -209,6 +219,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             reps=reps,
             weight=weight,
             unit_id=unit,
+            slot_entry_id=slot_entry_id,
             confirm_duplicate=confirm_duplicate,
         )
         body = api_models.WorkoutLogRequest(
