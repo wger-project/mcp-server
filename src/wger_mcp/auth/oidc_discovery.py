@@ -38,7 +38,6 @@ class OidcEndpoints(NamedTuple):
     jwks_uri: str
     token_endpoint: str
     authorization_endpoint: str
-    userinfo_endpoint: str | None = None
     registration_endpoint: str | None = None
     token_endpoint_auth_methods: list[str] | None = None
 
@@ -76,7 +75,6 @@ def discover_endpoints(
         resolved_jwks,
         resolved_token,
         resolved_authz,
-        doc.get("userinfo_endpoint"),
         doc.get("registration_endpoint"),
         doc.get("token_endpoint_auth_methods_supported"),
     )
