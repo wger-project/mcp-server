@@ -44,7 +44,9 @@ from .auth import (
     resource_identifier,
     uses_oauth,
 )
+from .compat import check_wger_version
 from .config import (
+    ConfigError,
     Settings,
     Transport,
     env_file_for,
@@ -115,6 +117,7 @@ async def serve_stdio(settings: Settings) -> None:
     there corrupts the stream (logging goes to stderr, see :func:`main`).
     """
     _require_transport(settings, Transport.stdio, "serve_stdio()")
+    await check_wger_version(settings)
     server = build_server(settings)
     try:
         await server.mcp.run_stdio_async()
@@ -149,6 +152,9 @@ def build_app(settings: Settings) -> Starlette:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
+        # Before the session manager, so an incompatible wger stops the boot
+        # rather than being discovered one tool call at a time
+        await check_wger_version(settings)
         async with mcp.session_manager.run():
             try:
                 yield
@@ -302,7 +308,12 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     # Passed as an override so the resolution above stays the only answer.
-    settings = load_settings(env_file=env_file, mcp_transport=transport)
+    try:
+        settings = load_settings(env_file=env_file, mcp_transport=transport)
+    except ConfigError as exc:
+        # Same shape as the transport errors above: the operator's typo deserves
+        # one readable line, not a traceback.
+        raise SystemExit(str(exc)) from None
 
     if settings.mcp_transport is Transport.stdio:
         log.info("transport=stdio, wger=%s", settings.wger_base_url)

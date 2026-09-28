@@ -5,6 +5,158 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+**Requires wger 2.7.** 
+ 
+The 2.7 API renamed and retyped fields this server
+writes to, so a single build cannot serve both releases. See below for what
+changed at the tool boundary.
+
+* The server reads wger's version once at startup and warns when it is older
+  than the API client expects, naming both. A warning rather than a refusal:
+  most of the surface does not care which release it talks to — the exercise
+  and ingredient catalogs have been stable for years — so an operator who
+  mostly wants those is better served by a server that starts. What breaks
+  breaks visibly. The expected version is not written down: it is the major
+  and minor of the installed `wger-api-client`, whose own README states the
+  rule — `2.6.x` targets a 2.6 server, the patch component belongs to the
+  package. So the two cannot drift, and upgrading the client raises the floor
+  with it. wger's own clients already do this — the app pins a
+  `MIN_SERVER_VERSION` and the sync command compares before it starts — and
+  this server was the one client that did not. Against 2.6 the failure was
+  otherwise unreadable: a TypeError from inside the generated client on a
+  session write, a valid weight id refused as malformed, a date filter dropped
+  without a word. A wger that is unreachable or reports an unparseable version
+  is logged and allowed through, since whether it happens to be up at boot
+  says nothing about compatibility. A pre-release counts as its release, so
+  2.7.0a2 is accepted.
+* **Breaking (arguments and results):** the body-weight tools go through
+  `/api/v2/measurement/` instead of the `/weightentry/` shim, which is what lets
+  the unit travel with the reading. `log_body_weight` and
+  `update_body_weight_entry` take `weight` (not `weight_kg`) plus an optional
+  `unit` of `kg` or `lb`, recorded on the entry itself; omitted, it is the
+  profile's weight unit, so passing it explicitly is also one request cheaper.
+  `get_body_weight_history` returns each entry as recorded (`weight` + `unit`)
+  alongside the same number in kilograms (`weight_kg`), and takes `date_from` /
+  `date_to`; both tools also reach the `notes` field, which the shim had no room
+  for.
+
+  The old name was wrong in both directions: the shim never took a unit, it read
+  the value in whatever the profile said at that moment, so `weight_kg=80` on an
+  imperial profile stored 80 lb — and a later profile switch reinterpreted every
+  earlier entry. Correcting a value now keeps the unit it was recorded in rather
+  than restamping it, and restating a unit preserves the provenance a health
+  import left on the entry instead of replacing `extra_data` wholesale.
+
+  Entry ids are UUIDs, as they already were through the shim — the `WeightEntry`
+  table was merged into body-weight measurements and its integer ids went with
+  it, so an id held from before wger 2.7 no longer resolves.
+* **Breaking (arguments):** `log_workout_session` and `update_workout_session`
+  take `started_at` / `ended_at` instead of `when` / `time_start` / `time_end`.
+  wger 2.7 stores a session as two timestamps rather than a date plus two wall
+  times, so a session may now run past midnight. Both arguments accept a full
+  timestamp or a bare date, which lands at 12:00 like everywhere else. Passing
+  only `ended_at` is no longer an error: a session without an end is one that is
+  still running, and closing it is a patch.
+* **Breaking (arguments):** `list_workout_sessions` takes `date_from` /
+  `date_to` instead of `when`. 2.7 can filter sessions over a range, so the
+  single-day restriction the old argument existed for is gone; pass the same day
+  twice for one day. The range is cut on the day a session *started*.
+* **Fixed:** patching a measurement no longer rewrites its `source`. The
+  generated client fills that field in with `user` unless it is explicitly
+  unset, so editing the note on an entry imported from Apple Health or Health
+  Connect would have claimed it as hand-entered — and an otherwise empty patch
+  would have been sent instead of refused.
+* New tool `summarize_measurements`: the server condenses a series into
+  per-period rows (count, sum, min, max per category, bucket and unit) instead
+  of this server paging the entries and the caller trimming them. A year of
+  daily weigh-ins is 365 entries through `list_measurements` and twelve rows
+  through this. `bucket=auto` picks the finest period that keeps the series
+  under `max_points`; buckets are cut in the trainee's own calendar, which wger
+  2.7 knows from their profile.
+* New tools `log_blood_pressure` and `get_blood_pressure_history`. wger stores a
+  reading as two entries in two child categories of a `blood_pressure` group,
+  paired by carrying the identical timestamp — reachable through
+  `log_measurement` in principle, but only by finding both categories and
+  matching timestamps by hand, and a pair that drifts apart by a second stops
+  being one reading. Logging also builds the category group on first use, and
+  reading pairs the halves back into one row.
+* `create_measurement_category` takes `metric_type`, so an assistant can set up
+  the typed categories 2.7 introduced (body fat, height, heart rate, steps, …)
+  rather than only free-form ones. The unit defaults to the conventional one per
+  type. Creating a `blood_pressure` or `sleep` group also creates the child
+  categories its readings go into.
+* `list_measurements` takes `source`, separating what the trainee typed from
+  what a phone's health sync wrote and from what wger calculates itself.
+* **Fixed:** measurement values are no longer bounded at 5000 by this server.
+  From 2.7 the range depends on the metric type of the category — 0 to 100000
+  for a step count, 0 to 1440 minutes for a sleep stage, 20 to 350 kg for a body
+  weight — so one number here fitted none of them and rejected a busy day's
+  steps before wger ever saw it. Only the column cap is checked now, and wger's
+  refusal names the actual range. `0` is accepted too: a rest day really is
+  0 steps, and the old bound required more than zero.
+* `list_measurement_categories` takes `metric_type`, and its description
+  explains the roles a category can have. The list is no longer just the
+  free-form categories a trainee invented: 2.7 adds the official body-weight
+  category, the blood-pressure and sleep group containers, their component
+  children, and the calculated ones. Three of those refuse entries or deletion,
+  which an assistant could previously only discover by being refused.
+* Sessions no longer claim that wger allows only one per routine per date. 2.7
+  dropped that constraint, and repeating it steered assistants into patching an
+  existing session when a second one was wanted.
+* **Security:** an OIDC bearer token must now carry a non-empty string `sub`
+  claim, or the request is rejected with 401. Previously a validly signed token
+  without `sub` was accepted and its identity fell back to the username claim,
+  or to the constant `unknown` when that was absent too. The outbound wger
+  credential is cached per identity, so two such callers would have shared one
+  cache entry, and the second would have acted with the first caller's wger
+  JWT. Common identity providers always put `sub` in access tokens, so a
+  typical deployment was not affected; the gap depended on an IdP that omits
+  it, together with the default empty allowlist. The username claim still
+  serves the allowlist and display, but never keys the credential cache.
+  Reported privately by WinstonRedGuard (github.com/WRG-11).
+
+* **Fixed:** a wger that answers too slowly is no longer reported as
+  unreachable, and a transport failure always names its reason. httpx raises
+  most of these with an empty message — `str()` on a ReadTimeout is `''` — so
+  the detail read `wger is unreachable: ` with nothing after the colon: true
+  about neither the cause nor the server, since the request had in fact
+  arrived. A read timeout now says wger did not answer within the 20s budget
+  and points at a slow query; a connect timeout says the connection itself was
+  never accepted; and anything else falls back to the exception's type rather
+  than to an empty string. The timeout is a named constant so the message
+  quotes the budget actually in force.
+
+* **Fixed:** `get_workout_for_date` no longer fails on a date the routine
+  covers but schedules no day on. wger returns one sequence entry per calendar
+  day, and `fit_in_week` pads the rest of the week with entries whose `day` is
+  null — four of the seven for a three-day split, so the common shape rather
+  than an edge case. The tool reached for that day's id and raised. It now
+  answers the way it already did for a rest day: `planned: []` with
+  `is_rest_day` true, keeping the entry's own iteration.
+
+  The null itself was never in wger's OpenAPI schema, which declares both `day`
+  and `label` as required and non-nullable on the two `WorkoutDayData`
+  serializers. The generated client believed it and died parsing the response
+  before this server saw it, which is why the tool failed for entire routines
+  rather than for single dates. Fixing that needs `allow_null=True` on those
+  serializer fields and a regenerated client; this change is what the server
+  does once such an entry reaches it.
+
+* **Security:** a bad configuration no longer prints part of `WGER_API_KEY` to
+  the log. Pydantic attaches the raw input to a `ValidationError` as
+  `input_value` and truncates only its middle, so the tail of whatever secret
+  was set survived into the message — and nothing caught that error, so it
+  reached stderr as an uncaught traceback: the client's MCP log under stdio,
+  the container log under http. A short key would have appeared in full.
+  `load_settings` now restates such a failure as `ConfigError`, carrying the
+  messages and none of the values, and the server turns it into the same
+  one-line exit it already gave for a bad `--transport`. Separately,
+  `WGER_API_KEY`, `MCP_STATIC_TOKEN` and `OIDC_CLIENT_SECRET` are `SecretStr`,
+  so anything that formats the settings object — a log line, a traceback frame
+  — sees `**********` rather than the value. Reading them back in code needs
+  `.get_secret_value()`; note that `str()` on one of these yields the mask, not
+  the secret.
+
 * `log_set`, `add_exercise_with_sets` and `attach_exercise_to_slot` take their
   default weight unit from the trainee's own wger profile instead of leaving a
   hardcoded `kg`. A profile set to pounds now records pounds when the caller
@@ -79,6 +231,29 @@ notes. This file records important changes to *this package*.
   names the scope the grant is missing — an agent that saw only the status code
   retried until it gave up, and a user who had granted `api:read` alone watched
   every write tool fail opaquely.
+* **Breaking (response shape):** `add_exercise_with_sets` returns the ids
+  flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
+  one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of
+  the full objects and made every caller map `["slot_entry"]["id"]` onto the
+  `slot_entry_id` parameter the follow-up tools actually take; the flat keys
+  match those parameter names, and the delete tools' responses, verbatim.
+* **Breaking (response shape):** `lookup_food_by_barcode` and
+  `lookup_foods_by_barcodes` no longer return `wger_ingredient_payload`. It
+  repeated the numbers already in `macros_per_100g` under a second set of keys,
+  shaped for a `create_ingredient` call that cannot exist — wger's REST
+  `/ingredient/` is read-only, and the tool was removed with the move to
+  multi-user auth. Every lookup was paying context for it. The macros
+  themselves are unchanged; read them from `macros_per_100g`.
+* `lookup_food_by_barcode` retries once on a 429 from Open Food Facts,
+  honouring `Retry-After`. The batch variant always did; the two were separate
+  implementations of the same request and now share one, so the difference was
+  never a decision anyone made.
+* Comma-separated values work in an env file, not just in the environment.
+  `ALLOWED_HOSTS=a,b` in `.env` used to abort startup with a parse error, since
+  only the process environment was rewritten to the JSON form the settings
+  loader understands. Affected `ALLOWED_HOSTS`, `MCP_TOOLS`,
+  `MCP_OIDC_ALGORITHMS`, `MCP_OIDC_ALLOWED_USERS` and `MCP_WGER_SCOPES`; the
+  JSON spelling keeps working.
 
 ## 0.2.0
 

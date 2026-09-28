@@ -1,7 +1,8 @@
-"""OidcAuthMiddleware: signature, iss, aud, exp, username claim, allowlist."""
+"""OidcAuthMiddleware: signature, iss, aud, exp, sub, username claim, allowlist."""
 
 from __future__ import annotations
 
+import pytest
 import respx
 from joserfc.jwk import RSAKey
 
@@ -145,6 +146,25 @@ def test_user_not_allowed(mock_jwks: respx.MockRouter, rsa_key: RSAKey) -> None:
         r = c.post("/mcp/", headers={"Authorization": f"Bearer {token}"}, json=_TOOLS_LIST)
         assert r.status_code == 401
         assert "not allowed" in r.json()["reason"].lower()
+
+
+@pytest.mark.parametrize(
+    "token_kwargs",
+    [
+        pytest.param({"sub": None}, id="absent"),
+        pytest.param({"sub": ""}, id="empty"),
+        pytest.param({"extra": {"sub": 42}}, id="not-a-string"),
+    ],
+)
+def test_sub_required(mock_jwks: respx.MockRouter, rsa_key: RSAKey, token_kwargs: dict) -> None:
+    """A validly signed token still needs a usable ``sub``: it keys the
+    outbound credential cache, so a username claim must not stand in for it
+    even with the allowlist off."""
+    token = make_token(rsa_key, preferred_username="alice", **token_kwargs)
+    with _client() as c:
+        r = c.post("/mcp/", headers={"Authorization": f"Bearer {token}"}, json=_TOOLS_LIST)
+        assert r.status_code == 401
+        assert "sub" in r.json()["reason"]
 
 
 def test_other_signer_rejected(mock_jwks: respx.MockRouter) -> None:

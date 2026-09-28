@@ -3,13 +3,13 @@
 > [!IMPORTANT]
 > This is still a WIP, not all things might work correctly yet
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https://wger.de) (>= 2.6) fitness/nutrition REST API as tools (routines, workout logging, exercise & ingredient catalog, nutrition plans + meals + recipes, diary, body-weight tracking, gym equipment, body measurements, volume/PR analytics, daily calorie calculator, …) so that AI assistants can read and write your wger data.
+An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https://wger.de) (>= 2.7) fitness/nutrition REST API as tools (routines, workout logging, exercise & ingredient catalog, nutrition plans + meals + recipes, diary, body-weight tracking, gym equipment, body measurements, volume/PR analytics, daily calorie calculator, …) so that AI assistants can read and write your wger data.
 
 It talks to a wger instance over its public REST API — it is a separate service and requires no changes to wger itself.
 
 - **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** (FastMCP) for a shared deployment. Pick with `--transport`.
-- **Auth:** **multi-user** — every request acts as the calling user's own wger account. On wger >= 2.7, wger is itself the OAuth2/OIDC provider and nothing else is needed ([`MCP_AUTH=wger_oidc`](#wger_oidc--wger-is-the-provider-recommended)); on 2.6, or behind an existing SSO, an external OIDC IdP does the same job with a token exchange ([`MCP_AUTH=oidc`](#oidc--an-external-idp)). For single-user self-hosting, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
-- **Requires:** wger >= 2.6 (>= 2.7 for `wger_oidc`), Python >= 3.11.
+- **Auth:** **multi-user** — every request acts as the calling user's own wger account. wger is itself the OAuth2/OIDC provider, so nothing else is needed ([`MCP_AUTH=wger_oidc`](#wger_oidc--wger-is-the-provider-recommended)); behind an existing SSO, an external OIDC IdP does the same job with a token exchange ([`MCP_AUTH=oidc`](#oidc--an-external-idp)). For single-user self-hosting, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
+- **Requires:** wger >= 2.7, Python >= 3.11. The server reads wger's version once at startup and warns if it is older than the API client expects (the major and minor of the installed `wger-api-client`), naming both. It warns rather than refuses: the exercise and ingredient catalogs are stable across releases and keep working, while the tools built on newer endpoints fail visibly when called.
 
 ## How auth works
 
@@ -318,17 +318,17 @@ This matters most for agents driven by small local models, whose tool-selection 
 
 #### Profiles that cover most agents
 
-Measured, not estimated: the token figures are the serialised tool list divided by four.
+Measured, not estimated: the token figures are the serialised tool list divided by four. They include the output schemas the MCP SDK now emits for every tool, which is why they are around a quarter higher than in earlier releases — the tool descriptions themselves did not grow by that much.
 
 | Agent | `MCP_TOOLS` | Tools | ~Tokens |
 |------|-------------|------:|--------:|
-| Everything (default) | *(unset)* | 85 | 18.6k |
-| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 11.5k |
-| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 6.5k |
-| Food logging | `nutrition,off,exercises,profile` | 29 | 6.6k |
-| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 20 | 3.0k |
+| Everything (default) | *(unset)* | 88 | 23.5k |
+| Coach — writes plans and reads them back | `routines,workout_logs,workout_sessions,exercises,analytics` | 49 | 13.0k |
+| Trainee — follows an existing plan and logs it | `routines_read,workout_logs,workout_sessions,exercises` | 28 | 7.3k |
+| Food logging | `nutrition,off,exercises,profile` | 29 | 7.4k |
+| Read-only review — progress, weight, measurements | `analytics,body_weight,measurements,profile` | 23 | 6.0k |
 
-The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.3k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.2k) creates and changes it. An agent that follows a plan needs only the first, which is nearly a quarter of the whole surface saved. `routines` remains valid and still means both.
+The training-plan tree is the largest group and splits in two: `routines_read` (9 tools, ~1.5k) reads the plan and answers what it prescribes today, `routines_write` (16 tools, ~4.7k) creates and changes it. An agent that follows a plan needs only the first, which is a fifth of the whole surface saved. `routines` remains valid and still means both.
 
 ### Profile
 
@@ -372,30 +372,44 @@ The training unit a day's sets belong to. wger opens one implicitly for a log th
 
 | Tool | Description |
 |------|-------------|
-| `log_workout_session(routine_id?, day_id?, when?, notes?, impression?, time_start?, time_end?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `time_start`/`time_end` are `HH:MM` and must be given together. One session per routine per date |
-| `list_workout_sessions(when?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first. wger filters on an exact date, so `when` takes one day rather than a range |
+| `log_workout_session(routine_id?, day_id?, started_at?, ended_at?, notes?, impression?)` | Record a session. `impression` is `bad`, `neutral` or `good` — the trainee's own verdict, which no aggregate over the logs can reconstruct. `started_at`/`ended_at` are full timestamps, so a session may run past midnight; a bare date lands at 12:00. Leaving `ended_at` out keeps the session open, to be closed by a patch when the workout ends |
+| `list_workout_sessions(date_from?, date_to?, routine_id?, impression?, limit?)` / `get_workout_session(session_id)` | Read sessions, newest first, optionally within a date range (both inclusive). The range is cut on the day a session *started*, which is the day it counts for |
 | `update_workout_session(session_id, ...)` / `delete_workout_session(session_id)` | Patch / delete a session. Deleting takes its logged sets with it |
 
 ### Body weight
 
+Since wger 2.7 a body weight is a measurement like any other, in an official `body_weight` category every account has from registration. These tools go through `/api/v2/measurement/` rather than the older `/weightentry/` shim, which is what lets the **unit travel with the reading**: the shim reads and writes in whatever the profile says at that moment, so switching a profile from kg to lb reinterprets everything written before it.
+
 | Tool | Description |
 |------|-------------|
-| `log_body_weight(weight_kg, when?)` | Body-weight entry |
-| `get_body_weight_history(limit?)` | Recent weight entries |
-| `update_body_weight_entry(entry_id, ...)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry |
+| `log_body_weight(weight, when?, unit?, notes?)` | Body-weight entry. `unit` is `kg` or `lb` and is recorded with the reading; left out it is the profile's weight unit, so passing it is both more precise and one request cheaper |
+| `get_body_weight_history(date_from?, date_to?, limit?)` | Recent entries, each with the reading as recorded (`weight` + `unit`) and the same number in kilograms (`weight_kg`) — a history can genuinely mix units |
+| `update_body_weight_entry(entry_id, weight?, when?, unit?, notes?)` / `delete_body_weight_entry(entry_id)` | Edit / remove an entry. Correcting a value keeps the unit it was recorded in; pass `unit` only to restate it, which preserves any provenance a health import left on the entry |
+
+For a trend rather than the entries, `summarize_measurements` works over this category like any other.
 
 ### Body measurements
 
-Anything tracked with a tape measure. Categories are the user's own (Waist, Chest, Bicep, …), each with its unit, and entries hang off them.
+Categories, each with its unit, and the entries that hang off them. Since wger 2.7 a category carries a `metric_type` saying what it holds: the free-form ones a trainee invents (Waist, Chest, Bicep, … all `custom`) sit alongside typed ones for body weight, body fat, height, heart rate, blood pressure, sleep, steps and the rest. Three kinds do not take entries directly — the group containers (`blood_pressure`, `sleep`), whose readings belong in their component children, and the calculated ones (`dynamic_type` other than `NONE`, e.g. BMI), which the server maintains.
 
 | Tool | Description |
 |------|-------------|
-| `list_measurement_categories(limit?)` / `get_measurement_category(category_id)` | Read categories |
-| `create_measurement_category(name, unit?)` | Add a category (e.g. `name='Bicep'`, `unit='cm'`) |
+| `list_measurement_categories(metric_type?, limit?)` / `get_measurement_category(category_id)` | Read categories. `metric_type` goes straight to one (`body_weight`, `body_fat`, `steps`, `sleep_rem`, …) instead of paging the list to find it |
+| `create_measurement_category(name, unit?, metric_type?)` | Add a category. Without `metric_type` it is free-form (`custom`), e.g. `name='Bicep'`, `unit='cm'`. With one it is typed (`body_fat`, `height`, `heart_rate`, `steps`, …), which is what lets wger chart it and a health sync write into it; the unit then defaults to the conventional one. One typed category per person, and the type cannot be changed afterwards |
 | `update_measurement_category(category_id, name?, unit?)` / `delete_measurement_category(category_id)` | Rename / re-unit a category, or delete it with all its entries |
-| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00 |
-| `list_measurements(category_id?, date_from?, date_to?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category and date range (both inclusive) |
+| `log_measurement(category_id, value, when?, notes?)` | Add an entry. Defaults to now; a bare date lands at 12:00. The range a value may be in follows the category's `metric_type` (20-350 kg for a body weight, 0-100000 for a step count), and wger's refusal names it |
+| `list_measurements(category_id?, date_from?, date_to?, source?, limit?)` / `get_measurement(measurement_id)` | Read entries (newest first), optionally per category, date range (both inclusive) and origin. `source` is `user` (hand-entered), `apple` / `google` (phone health sync) or `calculated` (maintained by wger, e.g. BMI) |
+| `summarize_measurements(category_id?, date_from?, date_to?, bucket?, max_points?, timezone_name?)` | Condense a series into per-period rows — count, sum, min, max per category, bucket and unit. `bucket` is `auto`, `hour`, `day`, `week` or `month`. A year of daily weigh-ins is 365 entries through `list_measurements` and twelve rows through this. Buckets follow the trainee's own calendar |
 | `update_measurement(measurement_id, value?, when?, notes?, category_id?)` / `delete_measurement(measurement_id)` | Edit / remove an entry. `category_id` moves one filed under the wrong category |
+
+#### Blood pressure
+
+A reading is two entries — systolic and diastolic — in two child categories of a `blood_pressure` group, paired by carrying the exact same timestamp. These two tools are what make that workable; doing it through `log_measurement` means finding both categories and matching timestamps by hand.
+
+| Tool | Description |
+|------|-------------|
+| `log_blood_pressure(systolic, diastolic, when?, notes?)` | Record one reading, writing both halves with one timestamp. Creates the category group the first time, so nothing has to be set up in advance. Refuses a pair passed the wrong way round |
+| `get_blood_pressure_history(date_from?, date_to?, limit?)` | Readings (newest first), each as one row with both numbers. A half missing its counterpart is reported with the other side null rather than dropped |
 
 ### Exercise catalog
 
@@ -447,8 +461,8 @@ Anything tracked with a tape measure. Categories are the user's own (Waist, Ches
 
 | Tool | Description |
 |------|-------------|
-| `lookup_food_by_barcode(barcode, language?)` | Resolve an EAN/UPC/GTIN on Open Food Facts. Returns the localised name + ingredients (when present), macros per 100 g, and a normalised `wger_ingredient_payload` (informational). Salt→sodium conversion applied automatically |
-| `lookup_foods_by_barcodes(barcodes[], language?)` | Batch variant — concurrent fetches (capped at 4 in flight) with one-shot retry on 429. Returns map keyed by barcode |
+| `lookup_food_by_barcode(barcode, language?)` | Resolve an EAN/UPC/GTIN on Open Food Facts. Returns the localised name + ingredients (when present) and macros per 100 g, with a one-shot retry on 429. Salt→sodium conversion applied automatically |
+| `lookup_foods_by_barcodes(barcodes[], language?)` | Batch variant — concurrent fetches (capped at 4 in flight). Returns map keyed by barcode |
 
 > Use these when you have a barcode — far more accurate than wger name search. Coverage is good for branded packaged goods and thin for supermarket private-labels, and it varies a lot by country. For items missing on OFF, the response includes a `suggestion` URL to add them — additions flow back into wger via the next ingredient-sync.
 >

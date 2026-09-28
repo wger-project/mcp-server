@@ -13,6 +13,8 @@ from wger_mcp.tools.common import (
     as_int,
     as_uuid,
     at_noon,
+    day_bounds,
+    day_range_filters,
     opt,
     require_fields,
 )
@@ -87,3 +89,37 @@ def test_empty_patch_is_refused() -> None:
     require_fields(_Body({"name": "x"}))
     with pytest.raises(ToolInputError, match="no fields to update"):
         require_fields(_Body({}))
+
+
+# ---------- day_bounds / day_range_filters ----------
+
+
+def test_range_covers_the_whole_last_day() -> None:
+    """The bound wger filters on is exclusive, so it has to land on the day
+    after the one the caller asked for — anything else drops the final day."""
+    since, until = day_bounds(date(2026, 8, 1), date(2026, 8, 18))
+    assert since == datetime(2026, 8, 1, 0, 0)
+    assert until == datetime(2026, 8, 19, 0, 0)
+
+
+def test_a_single_day_is_a_whole_day() -> None:
+    since, until = day_bounds(date(2026, 8, 18), date(2026, 8, 18))
+    assert since == datetime(2026, 8, 18, 0, 0)
+    assert until == datetime(2026, 8, 19, 0, 0)
+
+
+def test_open_ends_stay_open() -> None:
+    assert day_bounds(None, None) == (None, None)
+    assert day_bounds(date(2026, 8, 1), None)[1] is None
+    assert day_bounds(None, date(2026, 8, 1))[0] is None
+
+
+def test_filters_leave_out_what_was_not_asked_for() -> None:
+    """An absent key, not UNSET: an unfiltered call sends no date query."""
+    assert day_range_filters(None, None) == {}
+    assert set(day_range_filters(date(2026, 8, 1), None)) == {"date_gte"}
+    assert set(day_range_filters(None, date(2026, 8, 1))) == {"date_lt"}
+    assert set(day_range_filters(date(2026, 8, 1), date(2026, 8, 2))) == {
+        "date_gte",
+        "date_lt",
+    }

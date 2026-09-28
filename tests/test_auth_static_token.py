@@ -46,7 +46,8 @@ def _settings(**overrides: object) -> Settings:
 def test_static_token_strategy_accepts_valid_config() -> None:
     s = _settings()
     assert s.mcp_auth is AuthStrategy.static_token
-    assert s.mcp_static_token == TOKEN
+    assert s.mcp_static_token is not None
+    assert s.mcp_static_token.get_secret_value() == TOKEN
 
 
 @pytest.mark.parametrize(
@@ -146,4 +147,6 @@ def test_the_pre_rename_variable_name_still_configures_deployments(
     for key, value in env.items():
         monkeypatch.setenv(key, value)
 
-    assert load_settings(env_file=None).wger_dev_token == expected
+    token = load_settings(env_file=None).wger_dev_token
+    assert token is not None
+    assert token.get_secret_value() == expected

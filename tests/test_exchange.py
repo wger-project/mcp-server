@@ -6,6 +6,7 @@ import base64
 import json
 import time
 
+import httpx
 import pytest
 import respx
 
@@ -67,6 +68,43 @@ async def test_exchange_chain_and_cache() -> None:
             second = await ex.wger_token_for(identity)
             assert second == wger_jwt
             assert kc.call_count == 1 and wg.call_count == 1
+    finally:
+        await ex.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cache_is_per_subject() -> None:
+    """Each subject exchanges its own inbound token and gets its own wger JWT."""
+    ex = _exchanger()
+    try:
+        with respx.mock() as router:
+            kc = router.post(TOKEN_ENDPOINT).respond(json={"access_token": "kc-access"})
+            wg = router.post(PROVIDER_TOKEN_URL)
+            wg.side_effect = [
+                httpx.Response(200, json={"meta": {"access_token": _fake_jwt(3600)}}),
+                httpx.Response(200, json={"meta": {"access_token": _fake_jwt(7200)}}),
+            ]
+
+            alice = await ex.wger_token_for(
+                Identity(subject="uuid-alice", inbound_token="alice-inbound")
+            )
+            bob = await ex.wger_token_for(Identity(subject="uuid-bob", inbound_token="bob-inbound"))
+            assert alice != bob
+            assert kc.call_count == 2 and wg.call_count == 2
+            forwarded = [
+                dict(p.split("=", 1) for p in bytes(c.request.content).decode().split("&"))[
+                    "subject_token"
+                ]
+                for c in kc.calls
+            ]
+            assert forwarded == ["alice-inbound", "bob-inbound"]
+
+            # each subject keeps hitting its own cache entry
+            assert (
+                await ex.wger_token_for(Identity(subject="uuid-alice", inbound_token="x")) == alice
+            )
+            assert await ex.wger_token_for(Identity(subject="uuid-bob", inbound_token="y")) == bob
+            assert kc.call_count == 2 and wg.call_count == 2
     finally:
         await ex.aclose()
 

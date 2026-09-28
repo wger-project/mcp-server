@@ -6,7 +6,7 @@ import functools
 import json
 import re
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
@@ -17,7 +17,7 @@ from wger_api_client.client import AuthenticatedClient
 from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.types import UNSET, Unset
 
-from ..api_client import paginate
+from ..api_client import REQUEST_TIMEOUT_SECONDS, paginate
 
 T = TypeVar("T")
 
@@ -55,6 +55,18 @@ REPETITION_UNITS: dict[str, int] = {
 RIR_MAX = 4.5
 RIR_STEP = 0.5
 
+# What the value column of a measurement can physically hold (max_digits=8,
+# decimal_places=2). Body weight goes through the same column since wger 2.7
+# merged the weight table into measurements.
+#
+# Deliberately the *column* cap and not a plausible one: from 2.7 the range a
+# value may be in depends on the metric type of its category — 20-350 kg for a
+# body weight, 0-100000 for a step count, 0-1440 minutes for a sleep stage
+# (wger/measurements/limits.py). One number here fits none of them, and the
+# server's 400 names the actual range, which is a better answer than anything
+# this side could guess. So the bound only keeps out what no column can store.
+MEASUREMENT_VALUE_MAX = 999999.99
+
 
 class ToolInputError(Exception):
     """An argument wger cannot accept. Reported to the caller as a 400."""
@@ -83,7 +95,7 @@ def _scope_hint(detail: Any) -> str | None:
     if not match:
         return None
     return (
-        f'wger refused this call because the connection was authorized without '
+        f"wger refused this call because the connection was authorized without "
         f'the "{match.group(1)}" scope. It has to be authorized again with that '
         f"scope granted — retrying will fail the same way."
     )
@@ -109,7 +121,28 @@ def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
         elif exc.status_code == 403 and (hint := _scope_hint(detail)):
             out["hint"] = hint
         return out
-    return {"error": True, "status": 503, "detail": f"wger is unreachable: {exc}"}
+    return {"error": True, "status": 503, "detail": _transport_detail(exc)}
+
+
+def _transport_detail(exc: httpx.HTTPError) -> str:
+    """Say which way the call failed, in words the operator can act on.
+
+    httpx raises most transport errors with an empty message — ``str()`` on a
+    ReadTimeout is ``''`` — so without the type the reason is simply missing,
+    and a timeout reads as an unreachable server. The two need different
+    answers: one is a slow query or an undersized instance, the other a wrong
+    URL or a server that is down.
+    """
+    if isinstance(exc, httpx.ConnectTimeout):
+        return f"wger did not accept a connection within {REQUEST_TIMEOUT_SECONDS:g}s"
+    if isinstance(exc, httpx.TimeoutException):
+        # Read, write or pool: the connection stood, the answer did not arrive.
+        return (
+            f"wger did not answer within {REQUEST_TIMEOUT_SECONDS:g}s. The request "
+            f"reached it, so look for a slow query or an overloaded instance"
+        )
+    reason = str(exc).strip()
+    return f"wger is unreachable: {reason or type(exc).__name__}"
 
 
 def opt(value: T | None) -> T | Unset:
@@ -136,6 +169,26 @@ def as_int(value: str, field: str) -> int:
 def as_decimal(value: float) -> str:
     """Decimal fields travel as strings in the API."""
     return f"{value:g}"
+
+
+# The optional halves of the three above, for the arguments a patch may leave
+# out. Parsing and "absent stays absent" belong together: spelled apart, every
+# call site repeats the None check, and one of them eventually gets it backwards.
+
+
+def opt_uuid(value: str | None, field: str) -> UUID | Unset:
+    """:func:`as_uuid`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_uuid(value, field)
+
+
+def opt_int(value: str | None, field: str) -> int | Unset:
+    """:func:`as_int`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_int(value, field)
+
+
+def opt_decimal(value: float | None) -> str | Unset:
+    """:func:`as_decimal`, or ``UNSET`` when the caller left the argument out."""
+    return UNSET if value is None else as_decimal(value)
 
 
 def _unit_id(
@@ -264,6 +317,38 @@ def at_noon(when: date | datetime | None) -> datetime | None:
     if when is None or isinstance(when, datetime):
         return when
     return datetime.combine(when, _BARE_DATE_TIME)
+
+
+def day_bounds(first: date | None, last: date | None) -> tuple[datetime | None, datetime | None]:
+    """The half-open timestamp range covering the days ``first``..``last``.
+
+    Both ends are inclusive whole days at the tool boundary, while wger stores
+    these as timestamps and filters them with ``date_gte`` / ``date_lt``. The
+    upper bound is therefore midnight *after* ``last``: filtering on ``last``
+    itself would silently drop everything recorded on the final day, which is
+    the one nobody checks. Either end may be ``None``, leaving that side open.
+    """
+    since = None if first is None else datetime.combine(first, time.min)
+    until = None if last is None else datetime.combine(last + timedelta(days=1), time.min)
+    return since, until
+
+
+def day_range_filters(
+    first: date | None, last: date | None, field: str = "date"
+) -> dict[str, datetime]:
+    """:func:`day_bounds` as list-endpoint filters, an open end left out.
+
+    Absent rather than ``UNSET``, so an unfiltered call sends no date query at
+    all. ``field`` names the timestamp to filter on: wger spells it ``date`` on
+    logs and measurements, but a session is cut on ``datetime_start``.
+    """
+    since, until = day_bounds(first, last)
+    filters: dict[str, datetime] = {}
+    if since is not None:
+        filters[f"{field}_gte"] = since
+    if until is not None:
+        filters[f"{field}_lt"] = until
+    return filters
 
 
 class _Body(Protocol):
