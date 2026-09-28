@@ -43,6 +43,7 @@ from .auth import (
     protected_resource_metadata,
     resource_identifier,
 )
+from .compat import check_wger_version
 from .config import (
     AuthStrategy,
     Settings,
@@ -115,6 +116,7 @@ async def serve_stdio(settings: Settings) -> None:
     there corrupts the stream (logging goes to stderr, see :func:`main`).
     """
     _require_transport(settings, Transport.stdio, "serve_stdio()")
+    await check_wger_version(settings)
     server = build_server(settings)
     try:
         await server.mcp.run_stdio_async()
@@ -148,6 +150,9 @@ def build_app(settings: Settings) -> Starlette:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
+        # Before the session manager, so an incompatible wger stops the boot
+        # rather than being discovered one tool call at a time
+        await check_wger_version(settings)
         async with mcp.session_manager.run():
             try:
                 yield
