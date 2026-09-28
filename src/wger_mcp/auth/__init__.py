@@ -111,6 +111,9 @@ def resolve_endpoints(s: Settings) -> OidcEndpoints | None:
         authorization_endpoint=(
             str(s.oidc_authorization_endpoint) if s.oidc_authorization_endpoint else None
         ),
+        # wger's document also says whether DCR is on and which client auth it
+        # takes; overriding every endpoint must not silently lose that.
+        always_fetch=s.mcp_auth is AuthStrategy.wger_oidc,
     )
 
 

@@ -333,6 +333,24 @@ def test_registration_is_advertised_and_proxied_when_dcr_is_on(
     assert sent["scope"].split() == SCOPES
 
 
+def test_overriding_every_endpoint_keeps_registration(
+    mock_wger_oidc_dcr: respx.MockRouter,
+) -> None:
+    """The overrides exist for the internal/public URL split. Setting all three
+    used to skip wger's discovery document — and with it the only sign that DCR
+    is on, so /register vanished without a word."""
+    with _wger_client(
+        MCP_PUBLIC_URL="https://mcp.test",
+        OIDC_JWKS_URI="https://wger.example/jwks",
+        OIDC_TOKEN_ENDPOINT="https://wger.example/token",
+        OIDC_AUTHORIZATION_ENDPOINT="https://wger.example/authorize",
+    ) as c:
+        meta = c.get("/.well-known/oauth-authorization-server").json()
+        assert meta["registration_endpoint"] == "https://mcp.test/register"
+        r = c.get("/authorize?client_id=x", follow_redirects=False)
+        assert r.headers["location"].startswith("https://wger.example/authorize?")
+
+
 def test_registration_keeps_what_the_client_asked_for(
     mock_wger_oidc_dcr: respx.MockRouter,
 ) -> None:

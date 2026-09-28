@@ -50,14 +50,16 @@ def discover_endpoints(
     authorization_endpoint: str | None = None,
     timeout: float = 10.0,
     retry_delays: tuple[float, ...] = _RETRY_DELAYS,
+    always_fetch: bool = False,
 ) -> OidcEndpoints:
     """Return the endpoints for ``issuer``.
 
-    Uses explicit overrides where given; otherwise fetches the provider's
-    discovery document, retrying while the provider is unreachable or answers
-    5xx. Raises :class:`OidcDiscoveryError` if a needed value can't be resolved.
+    Uses explicit overrides where given; the document is skipped when all three
+    are, unless ``always_fetch``. Fetching retries while the provider is
+    unreachable or answers 5xx. Raises :class:`OidcDiscoveryError` if a needed
+    value can't be resolved.
     """
-    if jwks_uri and token_endpoint and authorization_endpoint:
+    if jwks_uri and token_endpoint and authorization_endpoint and not always_fetch:
         return OidcEndpoints(jwks_uri, token_endpoint, authorization_endpoint)
 
     url = issuer.rstrip("/") + "/.well-known/openid-configuration"
