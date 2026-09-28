@@ -215,6 +215,11 @@ changed at the tool boundary.
   works**, which the token-exchange mode could never support. See
   [ADR 0005](docs/adr/0005-native-wger-oidc.md).
 
+  The token is checked with wger (`/api/v2/userprofile/`, cached for a minute),
+  so a dead one is answered with `401 invalid_token` — the answer that makes an
+  MCP client refresh it. If wger cannot be reached the answer is `503`, which
+  leaves the client's token alone.
+
   `MCP_AUTH` still defaults to `oidc`, so nothing changes for an existing
   deployment; wger >= 2.7 deployments should set `wger_oidc` explicitly.
 
@@ -226,7 +231,9 @@ changed at the tool boundary.
   dynamic client registration switched on. It also drops the RFC 8707
   `resource` parameter from `/authorize` and `/token`: MCP clients name this
   server there, and wger refuses a token bound to it on every API call. New
-  settings: `MCP_WGER_SCOPES`, `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`.
+  settings: `MCP_WGER_SCOPES`, `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`. The
+  facade's metadata lists wger's client authentication methods, `none`
+  included, so public PKCE clients can register.
 
 * Tool errors distinguish the two upstream failures a retry cannot fix. A
   rejected token now carries a hint that the connection has to be authorized
@@ -241,6 +248,10 @@ changed at the tool boundary.
   session id and any valid token of their own, and a refreshed token was never
   used. Clients no longer receive an `mcp-session-id`; nothing on this server
   needed one.
+* OIDC discovery at startup waits for a provider that is not up yet — about
+  half a minute, on connection errors and 5xx — and then exits with one line
+  instead of a traceback. With `wger_oidc` the provider is wger itself, and a
+  compose file starting both together made the server crash-loop.
 * **Breaking (response shape):** `add_exercise_with_sets` returns the ids
   flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
   one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of

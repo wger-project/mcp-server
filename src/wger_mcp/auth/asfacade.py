@@ -61,6 +61,11 @@ AS_METADATA_PATH = "/.well-known/oauth-authorization-server"
 #: in which scopes the client asks for.
 _DEFAULT_SCOPES = ["openid", "profile", "email", "offline_access"]
 
+#: Client authentication at the token endpoint, when the provider does not say.
+#: No ``none``: with an external IdP the clients are confidential ones set up by
+#: the deployment.
+_DEFAULT_AUTH_METHODS = ["client_secret_post", "client_secret_basic"]
+
 
 def _merge_scopes(requested: str | None, required: list[str]) -> str:
     """The client's scope string with anything missing from ``required`` appended.
@@ -89,6 +94,7 @@ class AuthorizationServerFacade:
         required_scopes: list[str] | None = None,
         advertised_scopes: list[str] | None = None,
         strip_resource: bool = False,
+        token_endpoint_auth_methods: list[str] | None = None,
         timeout: float = 15.0,
     ) -> None:
         self._idp_authorize = idp_authorization_endpoint
@@ -104,6 +110,7 @@ class AuthorizationServerFacade:
         # MCP clients send `resource=<this server>` (RFC 8707). wger binds the
         # token to it and then refuses it on its own API ("Invalid target resource").
         self._strip_resource = strip_resource
+        self._auth_methods = token_endpoint_auth_methods or _DEFAULT_AUTH_METHODS
         self._client = httpx.AsyncClient(timeout=timeout)
 
     @property
@@ -125,10 +132,7 @@ class AuthorizationServerFacade:
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "code_challenge_methods_supported": ["S256"],
-            "token_endpoint_auth_methods_supported": [
-                "client_secret_post",
-                "client_secret_basic",
-            ],
+            "token_endpoint_auth_methods_supported": list(self._auth_methods),
             "scopes_supported": list(self._advertised_scopes),
         }
         if self._idp_register is not None:

@@ -188,10 +188,10 @@ MCP_PUBLIC_URL=https://mcp.example.com   # this server's public base URL
 
 Notes on what this mode does and does not do:
 
-- **The token is not validated here.** wger's access tokens are opaque — there is nothing to check against a JWKS, and wger re-checks the token and its scopes on every API call anyway. A revoked or expired token is therefore noticed at the first API call, and reported as such (see below).
+- **The token is checked with wger.** wger's access tokens are opaque, so the server asks wger's `/api/v2/userprofile/` whether a token is live and caches a positive answer for 60 seconds — keyed by a SHA-256 fingerprint, never by the token. A dead token is answered with `401 invalid_token`, which is what makes an MCP client refresh it; if wger cannot be reached the answer is `503`, so a client does not throw away a token that may be fine.
 - **Scopes.** wger gates reads behind `api:read` and every write behind `api:write`; `openid` identifies the user. A grant that is missing one produces a `403` naming the scope, which the tools surface with a *re-authorize this connection* hint rather than as a generic failure. For a read-only deployment, drop `api:write` from `MCP_WGER_SCOPES` and pair it with a read-only [`MCP_TOOLS`](#registering-only-some-groups) selection.
 - **MFA works.** The authorization-code flow runs in the user's browser against wger's own login, so TOTP/WebAuthn enrolled in wger applies. This is the one thing the token-exchange mode cannot do.
-- **The allowlist costs one request per token.** `MCP_OIDC_ALLOWED_USERS` needs a name, and an opaque token carries none, so the server asks wger's `/api/v2/userprofile/` once per token and caches the answer in memory — keyed by a SHA-256 fingerprint, never by the token. Without an allowlist configured, no such lookup happens at all.
+- **The allowlist is free.** `MCP_OIDC_ALLOWED_USERS` is checked against the username that same lookup returns.
 - **If wger is reached over an internal URL**, set `OIDC_AUTHORIZATION_ENDPOINT` to wger's *public* authorize URL: `/authorize` is followed by the user's browser, and discovery against an internal hostname returns internal URLs.
 
 ### `oidc` — an external IdP

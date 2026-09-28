@@ -51,11 +51,10 @@ These are written down because each one was found the hard way.
 
 6. **wger's access tokens are opaque**, and `ACCESS_TOKEN_FORMAT` is left at
    allauth's default. So under `wger_oidc` there is nothing to validate locally:
-   no JWKS check, no claims, no username in the token. Two things follow —
-   a bad token surfaces at the first API call rather than at the door (hence the
-   401/403 hint in `tools/common.api_err`), and naming the caller costs a
-   request to `/api/v2/userprofile/`, which is why it only happens when
-   `MCP_OIDC_ALLOWED_USERS` is set.
+   no JWKS check, no claims, no username in the token. The middleware asks
+   `/api/v2/userprofile/` instead, once per token and minute, and answers a dead
+   token with 401 — the only thing that makes a client refresh. wger itself
+   answers such tokens with 403 `token_not_valid`, never 401.
 
 7. **A DCR client gets whatever scopes it asks for.** allauth's
    `clean_scope` stores the requested list verbatim and defaults to `["openid"]`

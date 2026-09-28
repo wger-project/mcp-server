@@ -41,18 +41,22 @@ Add a fourth inbound strategy, `MCP_AUTH=wger_oidc`, in which this server is a
 plain resource server: it takes the caller's wger access token and puts it on
 the outbound `/api/v2/` call unchanged.
 
-### The token is not validated here
+### The token is checked by asking wger, and cached briefly
 
 wger's access tokens are **opaque** — allauth's default format, which wger does
 not override — so there is nothing to verify against a JWKS, and the existing
-`oidc` validation path does not apply. Introspection is off by default in
-allauth, and turning it on would buy a round trip per request for an answer wger
-gives anyway on the call itself.
+`oidc` validation path does not apply. The middleware asks
+`/api/v2/userprofile/` instead and caches a positive answer for 60 seconds.
 
-wger is therefore the single authority on whether a token is live and which
-scopes it carries. The price is that a bad token is only noticed at the first
-API call, which is why the error mapping below is part of this decision rather
-than a later polish item.
+*Amended 2026-09-28.* The first version did not check the token at all and let
+wger refuse it on the API call. That refusal reaches the client as a tool result
+inside an HTTP 200, and MCP clients refresh a token only on an HTTP 401: once
+the one-hour access token expired, every call failed until the user reconnected
+by hand. Checking at the door costs one lookup per token and minute; the TTL
+bounds how late a revoked token is noticed, and calls in that window still get
+wger's refusal with a re-authorize hint. When wger cannot be reached the answer
+is `503`, not `401`: a 401 would make the client discard a token that may be
+fine.
 
 ### The AS facade stays, pointed at wger
 
@@ -76,6 +80,9 @@ API is gated behind `api:read`/`api:write`:
   knows which scopes it needs and is the party the client believes it is
   registering with, so it is the right place to add them. Nothing is hidden from
   the user by that: what the facade adds is what the consent screen names.
+- **wger's client authentication methods are advertised**, `none` included, as
+  read from its discovery document. Public PKCE clients registering through
+  DCR need `none`; the external-IdP list offered only secret-based methods.
 - **`resource` is dropped** from `/authorize` and `/token`. MCP clients send
   `resource=<this server>` (RFC 8707), allauth binds the token to it, and wger's
   API then refuses that token with 403 "Invalid target resource" — on every
@@ -86,15 +93,13 @@ API is gated behind `api:read`/`api:write`:
   the 403 back. With an external IdP `resource` is passed through, since there
   the token is meant for this server.
 
-### Identity is resolved lazily, keyed by a fingerprint
+### Identity comes with the check, keyed by a fingerprint
 
-With opaque tokens the middleware cannot know who is calling. Nothing in the
-request path needs the username except logging and the optional allowlist, so it
-is fetched on first use per token — from `/api/v2/userprofile/`, which needs
-only `api:read`, rather than from OIDC `userinfo`, which would need the
-`profile` scope this server does not request — and cached in memory. The cache
-key and the identity's subject are a SHA-256 prefix of the token; the raw token
-is never logged and never used as a key.
+The same lookup names the caller, which serves logging and the optional
+allowlist. It uses `/api/v2/userprofile/`, which needs only `api:read`, rather
+than OIDC `userinfo`, which would need the `profile` scope this server does not
+request. The cache key and the identity's subject are a SHA-256 prefix of the
+token; the raw token is never logged and never used as a key.
 
 ### Rejections are classified by body, not status
 
@@ -110,8 +115,8 @@ A model that receives a bare rejection retries, and the retry fails
 identically: the token is the caller's own, and only a new authorization can
 produce a live one. So `api_err` attaches a hint saying the connection must be
 authorized again, and for a missing scope names it — a user who granted only
-`api:read` would otherwise watch every write tool fail opaquely. The allowlist
-lookup maps the same way: a named scope becomes `403 insufficient_scope`, any
+`api:read` would otherwise watch every write tool fail opaquely. The token
+check maps the same way: a named scope becomes `403 insufficient_scope`, any
 other rejection `401 invalid_token`, which is what makes a client refresh.
 
 ### The HTTP transport is stateless
@@ -119,8 +124,8 @@ other rejection `401 invalid_token`, which is what makes a client refresh.
 In a stateful MCP session every tool call runs in the context of the request
 that opened the session, so the bound identity — and with it the forwarded
 token — would be the first request's for the session's whole life. After the
-hourly refresh the expired token kept going out, and since this mode does not
-check the token locally, any bearer plus a known session id acted as the
+hourly refresh the expired token kept going out, and since this mode did not
+check the token locally then, any bearer plus a known session id acted as the
 session's owner. The server uses nothing a session provides (no server-initiated
 requests, no resumable streams; responses are plain JSON already), so it runs
 stateless: each request carries, and is served with, its own token. This
@@ -137,11 +142,13 @@ documented recommendation instead, set explicitly.
 
 ## Considered options
 
-- **Introspection, or JWT-format access tokens.** Would let a bad token be
-  rejected at the door rather than at the first API call. Costs a round trip per
-  request (introspection) or a wger-side format change plus key distribution
-  (JWT), to improve an error path that is already reported clearly. Revisit if
-  early rejection ever matters more.
+- **Introspection, or JWT-format access tokens.** The standard ways to check a
+  token at the door. Introspection is off by default in allauth and needs client
+  credentials this server does not have; JWTs need a wger-side format change
+  plus key distribution. The profile lookup gets the same answer — and the
+  username — with neither.
+- **Leave the check to wger's API call.** The first version of this ADR. Fails
+  the refresh, see above.
 - **Replace the exchange rather than add a strategy.** Cleaner, one code path
   less. Refused: it would strand wger 2.6 deployments and everyone whose users
   authenticate through a corporate SSO.
@@ -149,8 +156,8 @@ documented recommendation instead, set explicitly.
   shorter — and broken for claude.ai. Available as `MCP_AS_FACADE=false` for
   deployments whose clients all follow the pointer.
 - **Ask wger for `profile` as well, and read the username from `userinfo`.**
-  The textbook way to name the caller, but it widens the grant for something the
-  server needs only when an allowlist is configured.
+  The textbook way to name the caller, but it widens the grant for an answer
+  `userprofile` gives under `api:read`.
 
 ## Consequences
 
@@ -166,5 +173,8 @@ documented recommendation instead, set explicitly.
 - Every request costs wger a token lookup, and the fan-out tools issue many
   requests in parallel. Watch wger's throttle counters; the semaphore caps in
   the tool modules are the lever on this side.
+- Startup now depends on wger: the facade's endpoints come from its discovery
+  document. The server retries for about half a minute (connection errors and
+  5xx only), then exits with one line instead of a traceback.
 - This server still stores nothing: no database, no per-user secrets. The only
-  cache is username-by-fingerprint, in memory, per process.
+  cache is username-by-fingerprint, in memory, per process, for a minute.

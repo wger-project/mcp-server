@@ -5,22 +5,11 @@ access tokens it issues, so this server has nothing left to broker: the caller
 presents ``Authorization: Bearer <wger-token>`` and that same token goes back
 out on the ``/api/v2/`` call (see ``exchange.WgerTokenProvider``).
 
-Those tokens are **opaque** — allauth's default format — so there is nothing to
-verify against a JWKS and no claims to read. wger is the only authority on
-whether a token is live and which scopes it carries, and it checks that on
-every call anyway, so validating here would only add a second, staler source of
-truth. The middleware therefore does the little it can do locally (is there a
-bearer at all) and leaves the rest to wger.
-
-Two consequences follow, and both are handled here:
-
-- **A bad token is only noticed at the first API call.** wger's refusal has to
-  reach the client as "re-authenticate" rather than as a plain tool error; see
-  :func:`token_rejected` and ``tools/common.api_err``.
-- **The caller has no name until someone asks wger for it.** Nothing in the
-  request path needs one except the optional allowlist, so it is fetched only
-  where that makes it necessary, once per token, and cached — keyed by a
-  SHA-256 fingerprint, never by the token itself.
+Those tokens are **opaque** — allauth's default format — so the only way to
+check one is to ask wger. The middleware does that with ``/api/v2/userprofile/``
+and caches the answer for :data:`_TTL_SECONDS`, keyed by a SHA-256 fingerprint:
+a dead token has to be answered with an HTTP 401, because that is what makes a
+client refresh it. A tool result carrying wger's refusal arrives inside a 200.
 """
 
 from __future__ import annotations
@@ -29,6 +18,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import time
 from collections import OrderedDict
 from typing import Any
 
@@ -36,7 +26,7 @@ import httpx
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .base import is_bypass_path, reply_forbidden, reply_unauthorized
+from .base import is_bypass_path, reply_forbidden, reply_unauthorized, reply_unavailable
 from .identity import Identity, reset_identity, set_identity
 from .oauth import WELL_KNOWN_PATH, forwarded_origin
 
@@ -53,6 +43,10 @@ USERPROFILE_PATH = "/api/v2/userprofile/"
 #: is really "how many clients are connected at once"; the eviction order is
 #: LRU so a busy caller is never the one dropped.
 _CACHE_MAX = 1024
+
+#: How long a positive answer is trusted. Bounds how late an expired or revoked
+#: token is noticed; tool calls in that window still get wger's refusal.
+_TTL_SECONDS = 60.0
 
 
 def token_fingerprint(token: str) -> str:
@@ -109,27 +103,33 @@ class InsufficientScopeError(Exception):
 
 
 class UsernameResolver:
-    """Resolves and caches the wger username behind an opaque access token.
+    """Checks an opaque access token against wger and resolves its username.
 
     Concurrent requests carrying the same token share one lookup: the cache
     holds the in-flight task, not just the finished answer, so N parallel calls
     from one client cost one round trip rather than N.
     """
 
-    def __init__(self, base_url: str, *, timeout: float = 10.0) -> None:
+    def __init__(
+        self, base_url: str, *, timeout: float = 10.0, ttl_seconds: float = _TTL_SECONDS
+    ) -> None:
         self._url = base_url.rstrip("/") + USERPROFILE_PATH
         self._timeout = timeout
-        self._cache: OrderedDict[str, asyncio.Task[str | None]] = OrderedDict()
+        self._ttl = ttl_seconds
+        self._cache: OrderedDict[str, tuple[float, asyncio.Task[str | None]]] = OrderedDict()
 
     async def username_for(self, token: str, fingerprint: str) -> str | None:
-        task = self._cache.get(fingerprint)
-        if task is not None:
+        """The token's username; raises if wger refuses the token."""
+        entry = self._cache.get(fingerprint)
+        if entry is not None and time.monotonic() - entry[0] < self._ttl:
+            task = entry[1]
             self._cache.move_to_end(fingerprint)
         else:
             # No await between the lookup and the store, so two requests
             # carrying the same token cannot both start a lookup.
             task = asyncio.create_task(self._fetch(token))
-            self._cache[fingerprint] = task
+            self._cache[fingerprint] = (time.monotonic(), task)
+            self._cache.move_to_end(fingerprint)
             while len(self._cache) > _CACHE_MAX:
                 self._cache.popitem(last=False)
 
@@ -142,19 +142,20 @@ class UsernameResolver:
             raise
         if username is None:
             # wger answered but named nobody. Keeping that would lock the user
-            # out for the life of the process over one malformed response.
+            # out of an allowlist over one malformed response.
             self._forget(fingerprint, task)
         return username
 
     def _forget(self, fingerprint: str, task: asyncio.Task[str | None]) -> None:
         """Drop ``task`` from the cache, unless a newer lookup has replaced it."""
-        if self._cache.get(fingerprint) is task:
+        entry = self._cache.get(fingerprint)
+        if entry is not None and entry[1] is task:
             del self._cache[fingerprint]
 
     async def _fetch(self, token: str) -> str | None:
-        # A client per lookup rather than a pooled one: this runs once per token,
-        # and a long-lived client would need a shutdown hook that ASGI middleware
-        # does not get. Same trade-off as JwksCache in ``oidc.py``.
+        # A client per lookup rather than a pooled one: this runs once per token
+        # and TTL, and a long-lived client would need a shutdown hook that ASGI
+        # middleware does not get. Same trade-off as JwksCache in ``oidc.py``.
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(
                 self._url,
@@ -177,12 +178,7 @@ class UsernameResolver:
 
 
 class WgerBearerMiddleware:
-    """Requires a bearer token and binds it as the caller's identity.
-
-    The token is not inspected — see the module docstring. When
-    ``MCP_OIDC_ALLOWED_USERS`` is set the username *is* resolved here, before
-    the request runs: an allowlist applied after the fact would not be one.
-    """
+    """Requires a bearer token wger accepts and binds it as the caller's identity."""
 
     def __init__(
         self,
@@ -240,48 +236,40 @@ class WgerBearerMiddleware:
             return
 
         fingerprint = token_fingerprint(token)
-        username: str | None = None
-        if self._allowed:
-            try:
-                username = await self._resolver.username_for(token, fingerprint)
-            except InvalidTokenError:
-                log.warning("wger rejected the token of %s", fingerprint)
-                await reply_unauthorized(
-                    scope, receive, send,
-                    reason="wger rejected this token",
-                    www_authenticate=self._www_authenticate(
-                        request, error="invalid_token"
-                    ),
-                )
-                return
-            except InsufficientScopeError as exc:
-                await reply_forbidden(
-                    scope, receive, send,
-                    reason=str(exc),
-                    www_authenticate=self._www_authenticate(
-                        request, error="insufficient_scope"
-                    ),
-                )
-                return
-            except httpx.HTTPError as exc:
-                # The allowlist cannot be applied, so the request cannot be let
-                # through — but this is our outage, not the caller's fault.
-                log.warning("could not reach wger to resolve the caller: %s", exc)
-                await reply_unauthorized(
-                    scope, receive, send,
-                    reason="could not verify the caller against wger",
-                    www_authenticate=self._www_authenticate(request),
-                )
-                return
+        try:
+            username = await self._resolver.username_for(token, fingerprint)
+        except InvalidTokenError:
+            log.info("wger rejected the token of %s", fingerprint)
+            await reply_unauthorized(
+                scope, receive, send,
+                reason="wger rejected this token",
+                www_authenticate=self._www_authenticate(request, error="invalid_token"),
+            )
+            return
+        except InsufficientScopeError as exc:
+            await reply_forbidden(
+                scope, receive, send,
+                reason=str(exc),
+                www_authenticate=self._www_authenticate(request, error="insufficient_scope"),
+            )
+            return
+        except httpx.HTTPError as exc:
+            # Not a 401: that would make the client throw away a token that
+            # may well be fine.
+            log.warning("could not reach wger to check the caller's token: %s", exc)
+            await reply_unavailable(
+                scope, receive, send, reason="could not check the token with wger"
+            )
+            return
 
-            if username not in self._allowed:
-                log.warning("user %r not in allowed list", username)
-                await reply_unauthorized(
-                    scope, receive, send,
-                    reason="user not allowed",
-                    www_authenticate=self._www_authenticate(request),
-                )
-                return
+        if self._allowed and username not in self._allowed:
+            log.warning("user %r not in allowed list", username)
+            await reply_unauthorized(
+                scope, receive, send,
+                reason="user not allowed",
+                www_authenticate=self._www_authenticate(request),
+            )
+            return
 
         ctx = set_identity(
             Identity(

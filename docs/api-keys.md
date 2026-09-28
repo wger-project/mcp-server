@@ -34,17 +34,17 @@ server's [AS facade](../README.md#authorization-server-facade), which proxies to
 wger. The user logs in on wger's own login page — MFA included — and approves a
 consent screen naming the scopes.
 
-The token is **opaque**: this server does not and cannot validate it locally.
-wger checks it, and its scopes, on every API call.
+The token is **opaque**, so this server checks it by asking wger
+(`/api/v2/userprofile/`), caching a positive answer for a minute. A dead token
+gets a 401, which makes the client refresh it.
 
 Relevant settings:
 
 - `MCP_WGER_SCOPES` — what to ask wger for; default `openid api:read api:write`.
   `api:read` gates every read and `api:write` every write, so dropping the
   latter makes the deployment read-only.
-- `MCP_OIDC_ALLOWED_USERS` — optional allowlist. Costs one
-  `/api/v2/userprofile/` request per token, cached in memory, because an opaque
-  token carries no username; without it no such lookup happens.
+- `MCP_OIDC_ALLOWED_USERS` — optional allowlist, checked against the username
+  that lookup returns.
 
 Nothing else is configured: no client id, no secret, no audience, no issuer.
 See [ADR 0005](adr/0005-native-wger-oidc.md).

@@ -23,7 +23,7 @@ from wger_api_client.models.userprofile import Userprofile
 from wger_mcp.api_client import build_api_client
 from wger_mcp.auth.exchange import WgerTokenError, WgerTokenProvider
 from wger_mcp.auth.identity import Identity, reset_identity, set_identity
-from wger_mcp.auth.wger_oidc import UsernameResolver, token_fingerprint
+from wger_mcp.auth.wger_oidc import InvalidTokenError, UsernameResolver, token_fingerprint
 from wger_mcp.config import AuthStrategy, Settings, Transport, load_settings
 
 from .conftest import (
@@ -121,17 +121,27 @@ def test_empty_bearer_returns_401(mock_wger_oidc: respx.MockRouter) -> None:
         assert r.status_code == 401
 
 
-def test_any_bearer_is_accepted_without_an_allowlist(mock_wger_oidc: respx.MockRouter) -> None:
-    """Nothing is validated here: the token is opaque, and wger checks it on the
-    call itself. Not even a userprofile lookup happens (the route is unmocked,
-    so a request to it would fail the test)."""
+def test_a_token_wger_accepts_is_let_through(mock_wger_oidc: respx.MockRouter) -> None:
+    mock_wger_oidc.get(WGER_USERPROFILE).respond(json={"username": "alice"})
     with _client() as c:
         r = c.post(
             "/mcp/",
             json=_TOOLS_LIST,
             headers={"Authorization": f"Bearer {TOKEN}", **_MCP_HEADERS},
         )
-        assert r.status_code != 401
+        assert r.status_code == 200
+
+
+def test_a_dead_token_is_a_401_even_without_an_allowlist(
+    mock_wger_oidc: respx.MockRouter,
+) -> None:
+    """Only an HTTP 401 makes a client refresh. wger's refusal inside a tool
+    result arrives with a 200, and the client kept sending the dead token."""
+    mock_wger_oidc.get(WGER_USERPROFILE).respond(403, json=WGER_TOKEN_NOT_VALID)
+    with _client() as c:
+        r = c.post("/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"})
+        assert r.status_code == 401
+        assert 'error="invalid_token"' in r.headers["www-authenticate"]
 
 
 def test_bypass_paths_stay_public(mock_wger_oidc: respx.MockRouter) -> None:
@@ -196,13 +206,20 @@ def test_a_grant_without_api_read_is_a_403(mock_wger_oidc: respx.MockRouter) -> 
         assert "api:read" in r.json()["reason"]
 
 
-def test_an_unreachable_wger_does_not_let_the_request_through(
-    mock_wger_oidc: respx.MockRouter,
+@pytest.mark.parametrize(
+    "response",
+    [httpx.ConnectError("down"), httpx.Response(502), httpx.Response(429)],
+)
+def test_an_unavailable_wger_is_a_503_not_a_401(
+    mock_wger_oidc: respx.MockRouter, response: Exception | httpx.Response
 ) -> None:
-    mock_wger_oidc.get(WGER_USERPROFILE).mock(side_effect=httpx.ConnectError("down"))
-    with _client(MCP_OIDC_ALLOWED_USERS="alice") as c:
+    """The token cannot be checked, so the request cannot go through — but a 401
+    would make the client throw away a token that may well be fine."""
+    mock_wger_oidc.get(WGER_USERPROFILE).mock(side_effect=[response])
+    with _client() as c:
         r = c.post("/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"})
-        assert r.status_code == 401
+        assert r.status_code == 503
+        assert "www-authenticate" not in r.headers
 
 
 def test_the_username_is_looked_up_once_per_token(mock_wger_oidc: respx.MockRouter) -> None:
@@ -244,7 +261,7 @@ def test_a_failed_lookup_is_not_cached(mock_wger_oidc: respx.MockRouter) -> None
     with _client(MCP_OIDC_ALLOWED_USERS="alice") as c:
         assert c.post(
             "/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"}
-        ).status_code == 401
+        ).status_code == 503
         assert c.post(
             "/mcp/",
             json=_TOOLS_LIST,
@@ -267,6 +284,25 @@ async def test_concurrent_lookups_share_one_request() -> None:
         )
     assert results == ["alice"] * 5
     assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_positive_answer_expires() -> None:
+    """Otherwise a token revoked or expired after its first use would pass the
+    middleware for as long as the process lives."""
+    resolver = UsernameResolver(WGER_BASE, ttl_seconds=0)
+    with respx.mock() as router:
+        route = router.get(WGER_USERPROFILE)
+        route.mock(
+            side_effect=[
+                httpx.Response(200, json={"username": "alice"}),
+                httpx.Response(403, json=WGER_TOKEN_NOT_VALID),
+            ]
+        )
+        assert await resolver.username_for(TOKEN, "fp") == "alice"
+        with pytest.raises(InvalidTokenError):
+            await resolver.username_for(TOKEN, "fp")
+    assert route.call_count == 2
 
 
 @pytest.mark.asyncio

@@ -216,6 +216,9 @@ def wger_discovery_doc(*, registration: bool = False) -> dict[str, Any]:
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "scopes_supported": ["api:read", "api:write", "email", "openid", "profile"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_basic", "client_secret_post", "none"
+        ],
     }
     if registration:
         doc["registration_endpoint"] = WGER_REGISTER

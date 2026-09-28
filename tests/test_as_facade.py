@@ -260,6 +260,24 @@ def test_a_token_request_without_resource_is_forwarded_byte_for_byte(
     assert route.calls.last.request.content == body
 
 
+def test_wgers_client_auth_methods_are_advertised(mock_wger_oidc_dcr: respx.MockRouter) -> None:
+    """Public PKCE clients register with `none`; a list without it made strict
+    clients refuse to register or register as confidential ones."""
+    with _wger_client() as c:
+        meta = c.get("/.well-known/oauth-authorization-server").json()
+        assert "none" in meta["token_endpoint_auth_methods_supported"]
+
+
+def test_an_external_idp_advertises_secret_based_client_auth(
+    mock_jwks: respx.MockRouter,
+) -> None:
+    with _client() as c:
+        meta = c.get("/.well-known/oauth-authorization-server").json()
+        assert meta["token_endpoint_auth_methods_supported"] == [
+            "client_secret_post", "client_secret_basic"
+        ]
+
+
 def test_an_external_idp_keeps_resource(mock_jwks: respx.MockRouter) -> None:
     """The external IdP mints a token for this server, which is what RFC 8707
     is for; only the pass-through mode has to drop it."""

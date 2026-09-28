@@ -204,7 +204,17 @@ def build_authorization_server_facade(
         advertised_scopes=settings.mcp_wger_scopes if native else None,
         # The token is passed through to wger, so it must not be bound to us.
         strip_resource=native,
+        # Public clients registering via DCR need `none`, which wger supports.
+        token_endpoint_auth_methods=_wger_auth_methods(eps) if native else None,
     )
+
+
+def _wger_auth_methods(eps: OidcEndpoints) -> list[str]:
+    methods = eps.token_endpoint_auth_methods
+    if isinstance(methods, list) and all(isinstance(m, str) for m in methods) and methods:
+        return methods
+    # allauth's default, for when discovery was skipped
+    return ["client_secret_basic", "client_secret_post", "none"]
 
 
 def build_token_provider(settings: Settings) -> WgerTokenProvider:

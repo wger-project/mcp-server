@@ -44,6 +44,7 @@ from .auth import (
     resource_identifier,
     uses_oauth,
 )
+from .auth.oidc_discovery import OidcDiscoveryError
 from .compat import check_wger_version
 from .config import (
     ConfigError,
@@ -333,7 +334,10 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     log.info("MCP_AUTH=%s, MCP_PATH=%s", settings.mcp_auth.value, settings.mcp_path)
-    app = build_app(settings)
+    try:
+        app = build_app(settings)
+    except OidcDiscoveryError as exc:
+        raise SystemExit(str(exc)) from None
     # forwarded_allow_ips="*" so uvicorn trusts X-Forwarded-Proto / -For from any
     # peer. Required when running behind a reverse proxy on a separate IP (the
     # default whitelist of 127.0.0.1 silently ignores headers from nginx etc).

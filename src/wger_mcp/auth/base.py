@@ -56,6 +56,16 @@ async def reply_forbidden(
     await resp(scope, receive, send)
 
 
+async def reply_unavailable(scope: Scope, receive: Receive, send: Send, *, reason: str) -> None:
+    """503, for when the token cannot be checked. No challenge: it may be fine."""
+    resp = JSONResponse(
+        {"error": "temporarily_unavailable", "reason": reason},
+        status_code=503,
+        headers={"retry-after": "5"},
+    )
+    await resp(scope, receive, send)
+
+
 class NoAuthMiddleware:
     """No-op middleware. Use only for local dev (``MCP_AUTH=none``).
 
