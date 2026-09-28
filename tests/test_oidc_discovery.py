@@ -9,7 +9,17 @@ import respx
 from wger_mcp import server
 from wger_mcp.auth.oidc_discovery import OidcDiscoveryError, discover_endpoints
 
-from .conftest import WGER_BASE, WGER_DISCOVERY, wger_discovery_doc
+from .conftest import (
+    AUTHORIZATION_ENDPOINT,
+    ISSUER,
+    JWKS_URI,
+    OIDC_ENV,
+    TOKEN_ENDPOINT,
+    WGER_BASE,
+    WGER_DISCOVERY,
+    make_client,
+    wger_discovery_doc,
+)
 
 
 def test_a_provider_that_is_still_booting_is_waited_for() -> None:
@@ -68,3 +78,19 @@ def test_main_reports_a_failed_discovery_as_one_line(
     with pytest.raises(SystemExit) as exc:
         server.main(["--transport", "http"])
     assert "refused" in str(exc.value)
+
+
+def test_an_app_asks_the_provider_once() -> None:
+    """Middleware, facade and token exchange all need the endpoints; the app
+    resolves them once and hands them around."""
+    env = {k: v for k, v in OIDC_ENV.items() if not k.endswith(("_URI", "_ENDPOINT"))}
+    doc = {
+        "issuer": ISSUER,
+        "jwks_uri": JWKS_URI,
+        "token_endpoint": TOKEN_ENDPOINT,
+        "authorization_endpoint": AUTHORIZATION_ENDPOINT,
+    }
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(f"{ISSUER}/.well-known/openid-configuration").respond(json=doc)
+        make_client(**env)
+    assert route.call_count == 1

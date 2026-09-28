@@ -41,10 +41,11 @@ from .auth import (
     build_token_provider,
     forwarded_origin,
     protected_resource_metadata,
+    resolve_endpoints,
     resource_identifier,
     uses_oauth,
 )
-from .auth.oidc_discovery import OidcDiscoveryError
+from .auth.oidc_discovery import OidcDiscoveryError, OidcEndpoints
 from .compat import check_wger_version
 from .config import (
     ConfigError,
@@ -76,7 +77,9 @@ class Server:
         await self.provider.aclose()
 
 
-def build_server(settings: Settings, **fastmcp_kwargs: Any) -> Server:
+def build_server(
+    settings: Settings, *, endpoints: OidcEndpoints | None = None, **fastmcp_kwargs: Any
+) -> Server:
     """Wire up FastMCP and the upstream clients — identical for both transports.
 
     Options that only one transport has are the caller's to pass, because only
@@ -86,7 +89,7 @@ def build_server(settings: Settings, **fastmcp_kwargs: Any) -> Server:
     """
     mcp = FastMCP("wger", **fastmcp_kwargs)
 
-    provider = build_token_provider(settings)
+    provider = build_token_provider(settings, endpoints)
     api = build_api_client(settings, provider)
     off_http = off.build_http()
     register_all(mcp, api, off_http, settings)
@@ -135,8 +138,10 @@ def build_app(settings: Settings) -> Starlette:
     with the host allow-list dropped. Rejected up front instead.
     """
     _require_transport(settings, Transport.http, "build_app()")
+    endpoints = resolve_endpoints(settings)
     server = build_server(
         settings,
+        endpoints=endpoints,
         json_response=True,
         # A stateful session runs every tool call in the context of the request
         # that opened it, so the caller identity (and its token) would be the
@@ -153,7 +158,7 @@ def build_app(settings: Settings) -> Starlette:
     # AS facade: lets a client that treats this origin as the OAuth authorization
     # server (e.g. claude.ai) drive the flow here. None when the strategy has no
     # OAuth provider, or when MCP_AS_FACADE is off.
-    as_facade = build_authorization_server_facade(settings)
+    as_facade = build_authorization_server_facade(settings, endpoints)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
@@ -229,7 +234,7 @@ def build_app(settings: Settings) -> Starlette:
                 )
     app = Starlette(routes=routes, lifespan=lifespan)
     app.router.redirect_slashes = False
-    auth_cls, auth_kwargs = build_auth_middleware(settings)
+    auth_cls, auth_kwargs = build_auth_middleware(settings, endpoints)
     app.add_middleware(auth_cls, **auth_kwargs)
     return app
 

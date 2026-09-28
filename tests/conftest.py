@@ -120,12 +120,6 @@ def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in [k for k in os.environ if is_settings_var(k)]:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("WGER_BASE_URL", WGER_BASE)
-    # Endpoint discovery is memoised for the process, which is right for a
-    # server that resolves once at startup and wrong for a suite that builds
-    # dozens of apps against differently-mocked providers.
-    from wger_mcp.auth import reset_endpoint_cache
-
-    reset_endpoint_cache()
 
 
 @pytest.fixture(autouse=True)

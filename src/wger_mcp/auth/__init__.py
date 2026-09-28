@@ -62,7 +62,7 @@ __all__ = [
     "build_token_provider",
     "forwarded_origin",
     "protected_resource_metadata",
-    "reset_endpoint_cache",
+    "resolve_endpoints",
     "resource_identifier",
     "resource_metadata_url",
     "uses_oauth",
@@ -73,16 +73,6 @@ __all__ = [
 #: ``static_token``/``none`` advertising them would send clients through a flow
 #: whose result this server never accepts.
 _OAUTH_STRATEGIES = frozenset({AuthStrategy.wger_oidc, AuthStrategy.oidc})
-
-#: Endpoint resolution memoised for the process. Discovery is one synchronous
-#: fetch at startup, but three call sites want the answer; without this the
-#: server would ask the provider three times before it accepts a request.
-_endpoint_cache: dict[tuple[str | None, ...], OidcEndpoints] = {}
-
-
-def reset_endpoint_cache() -> None:
-    """Forget every memoised discovery result. For tests building many apps."""
-    _endpoint_cache.clear()
 
 
 def uses_oauth(settings: Settings) -> bool:
@@ -101,30 +91,34 @@ def issuer_url(settings: Settings) -> str | None:
     return str(settings.oidc_issuer) if settings.oidc_issuer else None
 
 
-def _resolve_endpoints(s: Settings) -> OidcEndpoints:
+def resolve_endpoints(s: Settings) -> OidcEndpoints | None:
+    """The provider's endpoints, or None when the strategy has no provider.
+
+    One discovery fetch; the app resolves once and hands the result to every
+    builder below.
+    """
     issuer = issuer_url(s)
-    if issuer is None:  # pragma: no cover - config validation rules this out
-        raise RuntimeError(f"MCP_AUTH={s.mcp_auth} has no token issuer configured")
+    if s.mcp_auth not in _OAUTH_STRATEGIES or issuer is None:
+        return None
     # The OIDC_*_ENDPOINT overrides apply to wger_oidc too, and are not merely a
     # convenience there: a deployment that reaches wger over an internal URL gets
     # internal URLs back from discovery, while /authorize is followed by the
     # user's *browser* and has to name the public one.
-    key = (
+    return discover_endpoints(
         issuer,
-        str(s.oidc_jwks_uri) if s.oidc_jwks_uri else None,
-        str(s.oidc_token_endpoint) if s.oidc_token_endpoint else None,
-        str(s.oidc_authorization_endpoint) if s.oidc_authorization_endpoint else None,
+        jwks_uri=str(s.oidc_jwks_uri) if s.oidc_jwks_uri else None,
+        token_endpoint=str(s.oidc_token_endpoint) if s.oidc_token_endpoint else None,
+        authorization_endpoint=(
+            str(s.oidc_authorization_endpoint) if s.oidc_authorization_endpoint else None
+        ),
     )
-    cached = _endpoint_cache.get(key)
-    if cached is None:
-        cached = discover_endpoints(
-            key[0],
-            jwks_uri=key[1],
-            token_endpoint=key[2],
-            authorization_endpoint=key[3],
-        )
-        _endpoint_cache[key] = cached
-    return cached
+
+
+def _endpoints(s: Settings, given: OidcEndpoints | None) -> OidcEndpoints:
+    eps = given or resolve_endpoints(s)
+    if eps is None:  # pragma: no cover - only called for the OAuth strategies
+        raise RuntimeError(f"MCP_AUTH={s.mcp_auth} has no token issuer configured")
+    return eps
 
 
 def _facade_paths(settings: Settings) -> set[str]:
@@ -143,7 +137,9 @@ def _secret(value: SecretStr | None) -> str:
     return value.get_secret_value() if value is not None else ""
 
 
-def build_auth_middleware(settings: Settings) -> tuple[type, dict[str, Any]]:
+def build_auth_middleware(
+    settings: Settings, endpoints: OidcEndpoints | None = None
+) -> tuple[type, dict[str, Any]]:
     """Pick an inbound auth middleware class + kwargs based on settings."""
     s = settings
     # Only pin the metadata URL when MCP_PUBLIC_URL is explicit; otherwise the
@@ -163,7 +159,7 @@ def build_auth_middleware(settings: Settings) -> tuple[type, dict[str, Any]]:
                 "public_paths": _facade_paths(s),
             }
         case AuthStrategy.oidc:
-            jwks_uri = _resolve_endpoints(s).jwks_uri
+            jwks_uri = _endpoints(s, endpoints).jwks_uri
             return OidcAuthMiddleware, {
                 "jwks_uri": jwks_uri,
                 "issuer": str(s.oidc_issuer),
@@ -179,7 +175,7 @@ def build_auth_middleware(settings: Settings) -> tuple[type, dict[str, Any]]:
 
 
 def build_authorization_server_facade(
-    settings: Settings,
+    settings: Settings, endpoints: OidcEndpoints | None = None
 ) -> AuthorizationServerFacade | None:
     """Build the AS facade for the OAuth strategies (None otherwise).
 
@@ -189,7 +185,7 @@ def build_authorization_server_facade(
     """
     if not settings.mcp_as_facade or not uses_oauth(settings):
         return None
-    eps = _resolve_endpoints(settings)
+    eps = _endpoints(settings, endpoints)
     native = settings.mcp_auth is AuthStrategy.wger_oidc
     return AuthorizationServerFacade(
         idp_authorization_endpoint=eps.authorization_endpoint,
@@ -217,7 +213,9 @@ def _wger_auth_methods(eps: OidcEndpoints) -> list[str]:
     return ["client_secret_basic", "client_secret_post", "none"]
 
 
-def build_token_provider(settings: Settings) -> WgerTokenProvider:
+def build_token_provider(
+    settings: Settings, endpoints: OidcEndpoints | None = None
+) -> WgerTokenProvider:
     """Build the outbound wger credential provider for the chosen strategy."""
     s = settings
     if s.mcp_auth is AuthStrategy.wger_oidc:
@@ -228,7 +226,7 @@ def build_token_provider(settings: Settings) -> WgerTokenProvider:
         # Both single-user strategies call wger with the same personal API key;
         # they differ only in whether inbound requests are authenticated.
         return WgerTokenProvider(dev_token=_secret(s.wger_dev_token))
-    token_endpoint = _resolve_endpoints(s).token_endpoint
+    token_endpoint = _endpoints(s, endpoints).token_endpoint
     exchanger = TokenExchanger(
         token_endpoint=token_endpoint,
         client_id=str(s.oidc_client_id),
