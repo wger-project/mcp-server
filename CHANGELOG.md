@@ -233,7 +233,11 @@ changed at the tool boundary.
   server there, and wger refuses a token bound to it on every API call. New
   settings: `MCP_WGER_SCOPES`, `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`. The
   facade's metadata lists wger's client authentication methods, `none`
-  included, so public PKCE clients can register.
+  included, so public PKCE clients can register. wger's discovery document is
+  read even when all three `OIDC_*` endpoint overrides are set; skipping it
+  used to switch off `/register` without a word. A `403 insufficient_scope`
+  names the scopes to request in its `WWW-Authenticate` header, where clients
+  that step up an authorization look for them.
 
 * Tool errors distinguish the two upstream failures a retry cannot fix. A
   rejected token now carries a hint that the connection has to be authorized
@@ -241,7 +245,9 @@ changed at the tool boundary.
   code retried until it gave up, and a user who had granted `api:read` alone
   watched every write tool fail opaquely. Both are recognised by wger's error
   body, since wger answers an expired or revoked token with `403
-  token_not_valid`, not `401`.
+  token_not_valid`, not `401`. A scope that `MCP_WGER_SCOPES` leaves out is
+  reported as unavailable on the deployment rather than as a reason to
+  re-authorize, which would only produce the same grant again.
 * **Fix:** the HTTP transport runs stateless. In a stateful MCP session every
   tool call ran with the identity of the request that opened the session, so
   under `oidc` a caller could act on the session opener's wger account with the
@@ -252,6 +258,10 @@ changed at the tool boundary.
   half a minute, on connection errors and 5xx — and then exits with one line
   instead of a traceback. With `wger_oidc` the provider is wger itself, and a
   compose file starting both together made the server crash-loop.
+* **Fix:** with `MCP_AS_FACADE=false` the protected-resource metadata names the
+  provider's issuer exactly as its discovery document states it. A trailing
+  slash used to be stripped, which broke the issuer comparison for Auth0-style
+  issuers.
 * **Breaking (response shape):** `add_exercise_with_sets` returns the ids
   flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
   one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of
