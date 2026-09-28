@@ -233,9 +233,10 @@ changed at the tool boundary.
   dynamic client registration switched on. It also drops the RFC 8707
   `resource` parameter from `/authorize` and `/token`: MCP clients name this
   server there, and wger refuses a token bound to it on every API call. New
-  settings: `MCP_WGER_SCOPES`, `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`. The
-  facade's metadata lists wger's client authentication methods, `none`
-  included, so public PKCE clients can register. wger's discovery document is
+  settings: `MCP_WGER_SCOPES` (must include `api:read`), `MCP_AS_FACADE`,
+  `OAUTH_REGISTER_PATH`. The facade's metadata lists wger's client
+  authentication methods, `none` included, so public PKCE clients can
+  register. wger's discovery document is
   read even when all three `OIDC_*` endpoint overrides are set; skipping it
   used to switch off `/register` without a word. A `403 insufficient_scope`
   names the scopes to request in its `WWW-Authenticate` header, where clients
