@@ -58,6 +58,14 @@ wger's refusal with a re-authorize hint. When wger cannot be reached the answer
 is `503`, not `401`: a 401 would make the client discard a token that may be
 fine.
 
+Since anyone can send a bearer, the check is also an upstream request anyone can
+trigger. Three things bound it: at most 32 lookups run against wger at once
+(past that the answer is `503` rather than another lookup — a lookup outlives a
+client that hangs up, so open connections alone would not bound it), a refusal
+is remembered for 10 seconds so a token sent again and again costs one lookup,
+and the lookups share one pooled client, closed at shutdown. Rate limiting by
+source stays the reverse proxy's job.
+
 ### The AS facade stays, pointed at wger
 
 [0003](0003-oauth-authorization-server-facade.md)'s original justification — a
@@ -170,8 +178,8 @@ documented recommendation instead, set explicitly.
   the Django admin. That is a wger-side item, tracked in `docs/HANDOFF.md`.
 - **Token lifetimes are generous** for a credential a third-party assistant
   holds: 1 h access, 120 d refresh with rotation. Worth revisiting per client.
-- Every request costs wger a token lookup, and the fan-out tools issue many
-  requests in parallel. Watch wger's throttle counters; the semaphore caps in
+- Every token costs wger a lookup per minute, and every request a token lookup
+  on the API call itself; the fan-out tools issue many requests in parallel. Watch wger's throttle counters; the semaphore caps in
   the tool modules are the lever on this side.
 - Startup now depends on wger: the facade's endpoints come from its discovery
   document. The server retries for about half a minute (connection errors and

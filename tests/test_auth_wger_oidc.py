@@ -17,13 +17,23 @@ import httpx
 import pytest
 import respx
 from pydantic import ValidationError
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
 from wger_api_client.api.userprofile import userprofile_retrieve
 from wger_api_client.models.userprofile import Userprofile
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.auth.exchange import WgerTokenError, WgerTokenProvider
 from wger_mcp.auth.identity import Identity, reset_identity, set_identity
-from wger_mcp.auth.wger_oidc import InvalidTokenError, UsernameResolver, token_fingerprint
+from wger_mcp.auth.wger_oidc import (
+    InvalidTokenError,
+    LookupOverloadedError,
+    UsernameResolver,
+    WgerBearerMiddleware,
+    token_fingerprint,
+)
 from wger_mcp.config import AuthStrategy, Settings, Transport, load_settings
 
 from .conftest import (
@@ -326,6 +336,94 @@ async def test_an_answer_that_names_nobody_is_not_cached() -> None:
         assert await resolver.username_for(TOKEN, "fp") is None
         assert await resolver.username_for(TOKEN, "fp") == "alice"
     assert route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_remembered_briefly() -> None:
+    """A token sent again and again costs wger one lookup, not one per request."""
+    resolver = UsernameResolver(WGER_BASE)
+    with respx.mock() as router:
+        route = router.get(WGER_USERPROFILE).respond(403, json=WGER_TOKEN_NOT_VALID)
+        for _ in range(3):
+            with pytest.raises(InvalidTokenError):
+                await resolver.username_for(TOKEN, "fp")
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_refusal_expires() -> None:
+    resolver = UsernameResolver(WGER_BASE, negative_ttl_seconds=0)
+    with respx.mock() as router:
+        route = router.get(WGER_USERPROFILE)
+        route.mock(
+            side_effect=[
+                httpx.Response(403, json=WGER_TOKEN_NOT_VALID),
+                httpx.Response(200, json={"username": "alice"}),
+            ]
+        )
+        with pytest.raises(InvalidTokenError):
+            await resolver.username_for(TOKEN, "fp")
+        assert await resolver.username_for(TOKEN, "fp") == "alice"
+
+
+@pytest.mark.asyncio
+async def test_lookups_in_flight_are_capped() -> None:
+    """Anyone can send a bearer, and a lookup outlives a client that hangs up;
+    past the cap a new token is turned away instead of starting another one."""
+    resolver = UsernameResolver(WGER_BASE, max_in_flight=1)
+    release = asyncio.Event()
+
+    async def slow(token: str) -> str:
+        await release.wait()
+        return "alice"
+
+    resolver._fetch = slow  # type: ignore[method-assign]
+    first = asyncio.create_task(resolver.username_for("a", "fa"))
+    await asyncio.sleep(0)
+    with pytest.raises(LookupOverloadedError):
+        await resolver.username_for("b", "fb")
+    # The same token joins the lookup already running rather than counting twice
+    joined = asyncio.create_task(resolver.username_for("a", "fa"))
+    release.set()
+    assert await first == await joined == "alice"
+    # Capacity comes back once the lookup is done
+    assert await resolver.username_for("b", "fb") == "alice"
+
+
+def test_an_overloaded_check_is_a_503() -> None:
+    class Busy(UsernameResolver):
+        async def username_for(self, token: str, fingerprint: str) -> str | None:
+            raise LookupOverloadedError
+
+    app = WgerBearerMiddleware(
+        _ok_app, wger_base_url=WGER_BASE, resolver=Busy(WGER_BASE)
+    )
+    r = TestClient(app).get("/mcp", headers={"Authorization": f"Bearer {TOKEN}"})
+    assert r.status_code == 503
+    assert "www-authenticate" not in r.headers
+
+
+def test_the_pooled_client_is_closed_at_shutdown() -> None:
+    resolver = UsernameResolver(WGER_BASE)
+    inner = Starlette(routes=[Route("/mcp", _ok_endpoint)])
+    inner.add_middleware(WgerBearerMiddleware, wger_base_url=WGER_BASE, resolver=resolver)
+    with respx.mock() as router:
+        router.get(WGER_USERPROFILE).respond(json={"username": "alice"})
+        with TestClient(inner) as c:
+            for token in ("one", "two"):
+                c.get("/mcp", headers={"Authorization": f"Bearer {token}"})
+            pooled = resolver._client
+            assert pooled is not None
+        assert pooled.is_closed
+    assert resolver._client is None
+
+
+async def _ok_endpoint(request: Any) -> PlainTextResponse:
+    return PlainTextResponse("ok")
+
+
+async def _ok_app(scope: Any, receive: Any, send: Any) -> None:
+    await PlainTextResponse("ok")(scope, receive, send)
 
 
 # ---------- the fingerprint ----------

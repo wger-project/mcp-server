@@ -218,7 +218,9 @@ changed at the tool boundary.
   The token is checked with wger (`/api/v2/userprofile/`, cached for a minute),
   so a dead one is answered with `401 invalid_token` — the answer that makes an
   MCP client refresh it. If wger cannot be reached the answer is `503`, which
-  leaves the client's token alone.
+  leaves the client's token alone. At most 32 checks run against wger at once
+  (past that: `503`), and a refused token is remembered for 10 seconds, so a
+  flood of made-up bearers cannot turn into a flood of requests to wger.
 
   `MCP_AUTH` still defaults to `oidc`, so nothing changes for an existing
   deployment; wger >= 2.7 deployments should set `wger_oidc` explicitly.

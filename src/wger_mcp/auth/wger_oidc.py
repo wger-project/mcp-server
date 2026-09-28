@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 from starlette.requests import Request
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .base import (
     bearer_token,
@@ -53,6 +53,15 @@ _CACHE_MAX = 1024
 #: How long a positive answer is trusted. Bounds how late an expired or revoked
 #: token is noticed; tool calls in that window still get wger's refusal.
 _TTL_SECONDS = 60.0
+
+#: How long a refusal is remembered, so a token sent again and again costs wger
+#: one lookup. Short: a client that got the 401 comes back with a new token.
+_NEGATIVE_TTL_SECONDS = 10.0
+
+#: Lookups running against wger at once. Anyone can send a bearer, and a lookup
+#: outlives a client that hangs up, so without a cap the lookups in flight
+#: would not be bounded by the connections open. Past it the answer is a 503.
+_MAX_IN_FLIGHT = 32
 
 
 def token_fingerprint(token: str) -> str:
@@ -108,6 +117,10 @@ class InsufficientScopeError(Exception):
         self.scope = scope
 
 
+class LookupOverloadedError(Exception):
+    """Too many lookups are already running against wger."""
+
+
 class UsernameResolver:
     """Checks an opaque access token against wger and resolves its username.
 
@@ -117,23 +130,38 @@ class UsernameResolver:
     """
 
     def __init__(
-        self, base_url: str, *, timeout: float = 10.0, ttl_seconds: float = _TTL_SECONDS
+        self,
+        base_url: str,
+        *,
+        timeout: float = 10.0,
+        ttl_seconds: float = _TTL_SECONDS,
+        negative_ttl_seconds: float = _NEGATIVE_TTL_SECONDS,
+        max_in_flight: int = _MAX_IN_FLIGHT,
     ) -> None:
         self._url = base_url.rstrip("/") + USERPROFILE_PATH
         self._timeout = timeout
         self._ttl = ttl_seconds
+        self._negative_ttl = negative_ttl_seconds
+        self._max_in_flight = max_in_flight
+        self._in_flight = 0
         self._cache: OrderedDict[str, tuple[float, asyncio.Task[str | None]]] = OrderedDict()
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def username_for(self, token: str, fingerprint: str) -> str | None:
         """The token's username; raises if wger refuses the token."""
         entry = self._cache.get(fingerprint)
-        if entry is not None and time.monotonic() - entry[0] < self._ttl:
+        if entry is not None and self._fresh(*entry):
             task = entry[1]
             self._cache.move_to_end(fingerprint)
         else:
+            if self._in_flight >= self._max_in_flight:
+                raise LookupOverloadedError
             # No await between the lookup and the store, so two requests
             # carrying the same token cannot both start a lookup.
+            self._in_flight += 1
             task = asyncio.create_task(self._fetch(token))
+            task.add_done_callback(self._lookup_done)
             self._cache[fingerprint] = (time.monotonic(), task)
             self._cache.move_to_end(fingerprint)
             while len(self._cache) > _CACHE_MAX:
@@ -143,7 +171,8 @@ class UsernameResolver:
         # another request is waiting on.
         try:
             username = await asyncio.shield(task)
-        except (InvalidTokenError, InsufficientScopeError, httpx.HTTPError):
+        except httpx.HTTPError:
+            # Our outage, not the token's: the next request asks again.
             self._forget(fingerprint, task)
             raise
         if username is None:
@@ -152,21 +181,50 @@ class UsernameResolver:
             self._forget(fingerprint, task)
         return username
 
+    def _fresh(self, created: float, task: asyncio.Task[str | None]) -> bool:
+        if not task.done():
+            return True
+        if task.cancelled():
+            return False
+        age = time.monotonic() - created
+        exc = task.exception()
+        if exc is None:
+            return age < self._ttl
+        if isinstance(exc, (InvalidTokenError, InsufficientScopeError)):
+            return age < self._negative_ttl
+        return False
+
+    def _lookup_done(self, _task: asyncio.Task[str | None]) -> None:
+        self._in_flight -= 1
+
     def _forget(self, fingerprint: str, task: asyncio.Task[str | None]) -> None:
         """Drop ``task`` from the cache, unless a newer lookup has replaced it."""
         entry = self._cache.get(fingerprint)
         if entry is not None and entry[1] is task:
             del self._cache[fingerprint]
 
-    async def _fetch(self, token: str) -> str | None:
-        # A client per lookup rather than a pooled one: this runs once per token
-        # and TTL, and a long-lived client would need a shutdown hook that ASGI
-        # middleware does not get. Same trade-off as JwksCache in ``oidc.py``.
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(
-                self._url,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    def _http(self) -> httpx.AsyncClient:
+        # One pooled client per event loop: a connection belongs to the loop
+        # that opened it, and tests drive the app from more than one.
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client_loop is not loop:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(max_connections=self._max_in_flight),
             )
+            self._client_loop = loop
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def _fetch(self, token: str) -> str | None:
+        resp = await self._http().get(
+            self._url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
         if resp.status_code in (401, 403):
             # The user's own profile has no permission check beyond the token,
             # so a 403 that names no scope means the token is no good here —
@@ -208,12 +266,23 @@ class WgerBearerMiddleware:
         self._public_paths = public_paths or set()
         self._resolver = resolver or UsernameResolver(wger_base_url)
 
+    def _closing_on_shutdown(self, send: Send) -> Send:
+        async def wrapped(message: Message) -> None:
+            if message["type"] == "lifespan.shutdown.complete":
+                await self._resolver.aclose()
+            await send(message)
+
+        return wrapped
+
     def _www_authenticate(
         self, request: Request, *, error: str | None = None, scope: str | None = None
     ) -> str:
         return www_authenticate(request, self._resource_metadata_url, error=error, scope=scope)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, self._closing_on_shutdown(send))
+            return
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -257,6 +326,12 @@ class WgerBearerMiddleware:
                 www_authenticate=self._www_authenticate(
                     request, error="insufficient_scope", scope=self._scopes or exc.scope
                 ),
+            )
+            return
+        except LookupOverloadedError:
+            log.warning("too many token checks in flight; answering 503")
+            await reply_unavailable(
+                scope, receive, send, reason="too many token checks in flight"
             )
             return
         except httpx.HTTPError as exc:
