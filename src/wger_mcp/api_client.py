@@ -28,6 +28,12 @@ _USER_AGENT = f"wger-mcp/{__version__}"
 _UNUSED_TOKEN = "unused-async-client-authenticates-per-request"
 
 
+#: How long a single wger call may take. Named because the error path quotes
+#: it: an operator reading "no answer within 20s" can tell a slow query from an
+#: unreachable server, which "unreachable" alone does not.
+REQUEST_TIMEOUT_SECONDS = 20.0
+
+
 class _ProviderAuth(httpx.Auth):
     """Resolves the Authorization header per request from the token provider."""
 
@@ -58,7 +64,7 @@ def build_api_client(settings: Settings, provider: WgerTokenProvider) -> Authent
         httpx.AsyncClient(
             base_url=base_url,
             auth=_ProviderAuth(provider),
-            timeout=20.0,
+            timeout=REQUEST_TIMEOUT_SECONDS,
             headers={
                 "Accept": "application/json",
                 "User-Agent": _USER_AGENT,

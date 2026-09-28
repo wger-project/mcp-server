@@ -13,26 +13,22 @@ changed at the tool boundary.
 
 * The server reads wger's version once at startup and warns when it is older
   than the API client expects, naming both. A warning rather than a refusal:
-  most of the surface does not care which release it talks to — the exercise and
-  ingredient catalogs have been stable for years — so an operator who mostly
-  wants those is better served by a server that starts. What breaks breaks
-  visibly. The expected version is not written down: it is the major and minor
-  of the installed `wger-api-client`,
-  whose own README states the rule — `2.6.x` targets a 2.6 server, the patch
-  component belongs to the package. So the two cannot drift, and upgrading the
-  client raises the floor with it. wger's own clients already do this — the app
-  pins a `MIN_SERVER_VERSION` and the sync command compares before it starts —
-  and this server was the one client that did not.
-* **Fixed:** `log_body_weight` verifies that the category it resolved really is
-  the body-weight one. Against a wger without the `metric_type` filter the
-  request came back with every category the user has, and the first was taken —
-  which would have filed body weights under a waist measurement with no error
-  anywhere. The one way this could have quietly corrupted someone's records. Against 2.6 the failure was otherwise unreadable: a TypeError
-  from inside the generated client on a session write, a valid weight id
-  refused as malformed, a date filter dropped without a word. A wger that is
-  unreachable or reports an unparseable version is logged and allowed through,
-  since whether it happens to be up at boot says nothing about compatibility.
-  A pre-release counts as its release, so 2.7.0a2 is accepted.
+  most of the surface does not care which release it talks to — the exercise
+  and ingredient catalogs have been stable for years — so an operator who
+  mostly wants those is better served by a server that starts. What breaks
+  breaks visibly. The expected version is not written down: it is the major
+  and minor of the installed `wger-api-client`, whose own README states the
+  rule — `2.6.x` targets a 2.6 server, the patch component belongs to the
+  package. So the two cannot drift, and upgrading the client raises the floor
+  with it. wger's own clients already do this — the app pins a
+  `MIN_SERVER_VERSION` and the sync command compares before it starts — and
+  this server was the one client that did not. Against 2.6 the failure was
+  otherwise unreadable: a TypeError from inside the generated client on a
+  session write, a valid weight id refused as malformed, a date filter dropped
+  without a word. A wger that is unreachable or reports an unparseable version
+  is logged and allowed through, since whether it happens to be up at boot
+  says nothing about compatibility. A pre-release counts as its release, so
+  2.7.0a2 is accepted.
 * **Breaking (arguments and results):** the body-weight tools go through
   `/api/v2/measurement/` instead of the `/weightentry/` shim, which is what lets
   the unit travel with the reading. `log_body_weight` and
@@ -107,6 +103,59 @@ changed at the tool boundary.
 * Sessions no longer claim that wger allows only one per routine per date. 2.7
   dropped that constraint, and repeating it steered assistants into patching an
   existing session when a second one was wanted.
+* **Security:** an OIDC bearer token must now carry a non-empty string `sub`
+  claim, or the request is rejected with 401. Previously a validly signed token
+  without `sub` was accepted and its identity fell back to the username claim,
+  or to the constant `unknown` when that was absent too. The outbound wger
+  credential is cached per identity, so two such callers would have shared one
+  cache entry, and the second would have acted with the first caller's wger
+  JWT. Common identity providers always put `sub` in access tokens, so a
+  typical deployment was not affected; the gap depended on an IdP that omits
+  it, together with the default empty allowlist. The username claim still
+  serves the allowlist and display, but never keys the credential cache.
+  Reported privately by WinstonRedGuard (github.com/WRG-11).
+
+* **Fixed:** a wger that answers too slowly is no longer reported as
+  unreachable, and a transport failure always names its reason. httpx raises
+  most of these with an empty message — `str()` on a ReadTimeout is `''` — so
+  the detail read `wger is unreachable: ` with nothing after the colon: true
+  about neither the cause nor the server, since the request had in fact
+  arrived. A read timeout now says wger did not answer within the 20s budget
+  and points at a slow query; a connect timeout says the connection itself was
+  never accepted; and anything else falls back to the exception's type rather
+  than to an empty string. The timeout is a named constant so the message
+  quotes the budget actually in force.
+
+* **Fixed:** `get_workout_for_date` no longer fails on a date the routine
+  covers but schedules no day on. wger returns one sequence entry per calendar
+  day, and `fit_in_week` pads the rest of the week with entries whose `day` is
+  null — four of the seven for a three-day split, so the common shape rather
+  than an edge case. The tool reached for that day's id and raised. It now
+  answers the way it already did for a rest day: `planned: []` with
+  `is_rest_day` true, keeping the entry's own iteration.
+
+  The null itself was never in wger's OpenAPI schema, which declares both `day`
+  and `label` as required and non-nullable on the two `WorkoutDayData`
+  serializers. The generated client believed it and died parsing the response
+  before this server saw it, which is why the tool failed for entire routines
+  rather than for single dates. Fixing that needs `allow_null=True` on those
+  serializer fields and a regenerated client; this change is what the server
+  does once such an entry reaches it.
+
+* **Security:** a bad configuration no longer prints part of `WGER_API_KEY` to
+  the log. Pydantic attaches the raw input to a `ValidationError` as
+  `input_value` and truncates only its middle, so the tail of whatever secret
+  was set survived into the message — and nothing caught that error, so it
+  reached stderr as an uncaught traceback: the client's MCP log under stdio,
+  the container log under http. A short key would have appeared in full.
+  `load_settings` now restates such a failure as `ConfigError`, carrying the
+  messages and none of the values, and the server turns it into the same
+  one-line exit it already gave for a bad `--transport`. Separately,
+  `WGER_API_KEY`, `MCP_STATIC_TOKEN` and `OIDC_CLIENT_SECRET` are `SecretStr`,
+  so anything that formats the settings object — a log line, a traceback frame
+  — sees `**********` rather than the value. Reading them back in code needs
+  `.get_secret_value()`; note that `str()` on one of these yields the mask, not
+  the secret.
 
 * `log_set`, `add_exercise_with_sets` and `attach_exercise_to_slot` take their
   default weight unit from the trainee's own wger profile instead of leaving a
@@ -156,6 +205,30 @@ changed at the tool boundary.
   written, since `reps` is the bottom of the range. The `max_reps` config kind
   already existed for `set_slot_entry_config`; this reaches it from the
   high-level authoring call.
+
+* **Breaking (response shape):** `add_exercise_with_sets` returns the ids
+  flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
+  one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of
+  the full objects and made every caller map `["slot_entry"]["id"]` onto the
+  `slot_entry_id` parameter the follow-up tools actually take; the flat keys
+  match those parameter names, and the delete tools' responses, verbatim.
+* **Breaking (response shape):** `lookup_food_by_barcode` and
+  `lookup_foods_by_barcodes` no longer return `wger_ingredient_payload`. It
+  repeated the numbers already in `macros_per_100g` under a second set of keys,
+  shaped for a `create_ingredient` call that cannot exist — wger's REST
+  `/ingredient/` is read-only, and the tool was removed with the move to
+  multi-user auth. Every lookup was paying context for it. The macros
+  themselves are unchanged; read them from `macros_per_100g`.
+* `lookup_food_by_barcode` retries once on a 429 from Open Food Facts,
+  honouring `Retry-After`. The batch variant always did; the two were separate
+  implementations of the same request and now share one, so the difference was
+  never a decision anyone made.
+* Comma-separated values work in an env file, not just in the environment.
+  `ALLOWED_HOSTS=a,b` in `.env` used to abort startup with a parse error, since
+  only the process environment was rewritten to the JSON form the settings
+  loader understands. Affected `ALLOWED_HOSTS`, `MCP_TOOLS`,
+  `MCP_OIDC_ALGORITHMS` and `MCP_OIDC_ALLOWED_USERS`; the JSON spelling keeps
+  working.
 
 ## 0.2.0
 

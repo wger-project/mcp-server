@@ -8,7 +8,7 @@ what make its own fields reachable.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -33,7 +33,9 @@ from .common import (
     as_uuid,
     at_noon,
     bad_request,
+    day_range_filters,
     opt,
+    opt_int,
     require_fields,
 )
 
@@ -72,11 +74,10 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         to the morning it ended. impression filters on how the sessions felt:
         'bad', 'neutral' or 'good'.
         """
-        filters: dict[str, Any] = {"ordering": "-datetime_start"}
-        if date_from is not None:
-            filters["datetime_start_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["datetime_start_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
+        filters: dict[str, Any] = {
+            "ordering": "-datetime_start",
+            **day_range_filters(date_from, date_to, "datetime_start"),
+        }
         if routine_id is not None:
             filters["routine"] = as_int(routine_id, "routine_id")
         if impression is not None:
@@ -120,8 +121,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         if start is not None and end is not None and end < start:
             return bad_request("ended_at is before started_at")
         body = api_models.WorkoutSessionRequest(
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            routine=opt_int(routine_id, "routine_id"),
+            day=opt_int(day_id, "day_id"),
             datetime_start=opt(start),
             datetime_end=opt(end),
             notes=opt(notes),
@@ -152,8 +153,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         if start is not None and end is not None and end < start:
             return bad_request("ended_at is before started_at")
         body = api_models.PatchedWorkoutSessionRequest(
-            routine=opt(as_int(routine_id, "routine_id") if routine_id is not None else None),
-            day=opt(as_int(day_id, "day_id") if day_id is not None else None),
+            routine=opt_int(routine_id, "routine_id"),
+            day=opt_int(day_id, "day_id"),
             datetime_start=opt(start),
             datetime_end=opt(end),
             notes=opt(notes),

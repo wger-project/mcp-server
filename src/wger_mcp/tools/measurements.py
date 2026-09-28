@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -42,7 +42,9 @@ from .common import (
     as_uuid,
     at_noon,
     bad_request,
+    day_range_filters,
     opt,
+    opt_uuid,
     require_fields,
 )
 
@@ -301,15 +303,14 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
         so a reading synced from a watch is distinguishable from one the
         trainee typed — worth checking before treating a number as deliberate.
         """
-        filters: dict[str, Any] = {"ordering": "-date"}
+        filters: dict[str, Any] = {
+            "ordering": "-date",
+            **day_range_filters(date_from, date_to),
+        }
         if category_id is not None:
             filters["category"] = as_uuid(category_id, "category_id")
         if source is not None:
             filters["source"] = as_source(source)
-        if date_from is not None:
-            filters["date_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["date_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
         return await paginate(measurement_list.asyncio, client=api, limit=limit, **filters)
 
     @mcp.tool()
@@ -368,13 +369,13 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             raise ToolInputError(
                 f"unknown bucket '{bucket}'; expected one of {', '.join(sorted(BUCKETS))}"
             )
-        filters: dict[str, Any] = {"bucket": bucket, "max_points": max_points}
+        filters: dict[str, Any] = {
+            "bucket": bucket,
+            "max_points": max_points,
+            **day_range_filters(date_from, date_to),
+        }
         if category_id is not None:
             filters["category"] = as_uuid(category_id, "category_id")
-        if date_from is not None:
-            filters["date_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["date_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
         if timezone_name is not None:
             filters["tz"] = timezone_name
         # Not paginated: the endpoint answers with the whole series in one go,
@@ -412,7 +413,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             value=opt(value),
             date=opt(at_noon(when)),
             notes=opt(notes),
-            category=opt(as_uuid(category_id, "category_id") if category_id is not None else None),
+            category=opt_uuid(category_id, "category_id"),
             # Never send the source on a patch: it would restamp a health-synced
             # entry as hand-entered and lose the provenance the importer wrote,
             # and it would make every patch non-empty, walking straight past
@@ -503,11 +504,8 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
                 as_uuid(systolic_id, "category_id"),
                 as_uuid(diastolic_id, "category_id"),
             ],
+            **day_range_filters(date_from, date_to),
         }
-        if date_from is not None:
-            filters["date_gte"] = datetime.combine(date_from, time.min)
-        if date_to is not None:
-            filters["date_lt"] = datetime.combine(date_to + timedelta(days=1), time.min)
 
         # Two entries per reading, so ask for enough of them to fill `limit`
         entries = await paginate(measurement_list.asyncio, client=api, limit=limit * 2, **filters)

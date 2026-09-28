@@ -22,11 +22,14 @@ These are written down because each one was found the hard way.
    and why its paths are environment-configurable rather than fixed.
 
 2. **wger's REST `/ingredient/` is read-only.** The Open Food Facts tools can
-   look up a barcode and shape the macros into a wger-compatible payload, but
-   they cannot write it back. The old web-form path was dropped with the move to
-   multi-user auth, so `create_ingredient` was removed. **If wger ever gains a
-   writable ingredient endpoint, that tool should come back** — the payload
-   shaping is already there (`wger_ingredient_payload` in `tools/off.py`).
+   look up a barcode, but nothing can write it back: the generated client has
+   no `ingredient_create` and no `IngredientRequest` model, because the schema
+   exposes none. The old web-form path was dropped with the move to multi-user
+   auth, so `create_ingredient` was removed. **If wger ever gains a writable
+   ingredient endpoint, that tool should come back.** The `wger_ingredient_payload`
+   that used to be kept in `tools/off.py` for exactly that day is gone — it
+   repeated `macros_per_100g` under different keys in every response, and
+   renaming those keys is the small half of writing that tool.
 
 3. **`SocialApp.provider_id` is not reliably `openid_connect`.** It is whatever
    slug the admin configured. Hard-coding it produces a confusing failure deep

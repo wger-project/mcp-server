@@ -247,6 +247,28 @@ async def test_planned_set_records_unit_and_rir(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+async def test_result_is_the_flat_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The response is exactly the created ids, keyed as the follow-up tools
+    take them — no object echoes, no nesting."""
+    mcp = _register(routines)
+    _mock_creation(monkeypatch)
+    out = _result(
+        await mcp.call_tool(
+            "add_exercise_with_sets",
+            {"day_id": "8", "exercise_id": "73", "sets": 3, "reps": 8, "weight": 135, "rir": 2},
+        )
+    )
+    assert out == {
+        "slot_id": 1,
+        "slot_entry_id": 2,
+        "sets_config_id": 3,
+        "reps_config_id": 4,
+        "weight_config_id": 5,
+        "rir_config_id": 6,
+    }
+
+
+@pytest.mark.asyncio
 async def test_planned_set_follows_a_pound_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """Omitting the unit takes it from the profile here too, not a hardcoded kg."""
     mcp = _register(routines)

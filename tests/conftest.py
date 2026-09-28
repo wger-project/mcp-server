@@ -136,7 +136,7 @@ def jwks_dict(rsa_key: RSAKey) -> dict[str, Any]:
 def make_token(
     key: RSAKey,
     *,
-    sub: str = "uuid-alice",
+    sub: str | None = "uuid-alice",
     preferred_username: str = "alice",
     aud: str | list[str] = AUDIENCE,
     iss: str = ISSUER,
@@ -152,6 +152,8 @@ def make_token(
         "exp": now + exp_offset,
         "preferred_username": preferred_username,
     }
+    if sub is None:
+        del claims["sub"]
     if extra:
         claims.update(extra)
     header = {"alg": "RS256", "kid": key.kid, "typ": "JWT"}
