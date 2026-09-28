@@ -20,9 +20,8 @@ from joserfc.jwk import KeySet
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .base import is_bypass_path, reply_unauthorized
+from .base import bearer_token, is_bypass_path, reply_unauthorized, www_authenticate
 from .identity import Identity, reset_identity, set_identity
-from .oauth import WELL_KNOWN_PATH, forwarded_origin
 
 log = logging.getLogger(__name__)
 
@@ -131,14 +130,7 @@ class OidcAuthMiddleware:
         )
 
     def _www_authenticate(self, request: Request) -> str:
-        base = 'Bearer realm="wger-mcp"'
-        url = self._resource_metadata_url
-        if url is None:
-            origin = forwarded_origin(request)
-            url = origin + WELL_KNOWN_PATH if origin else None
-        if url:
-            base += f', resource_metadata="{url}"'
-        return base
+        return www_authenticate(request, self._resource_metadata_url)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -149,8 +141,8 @@ class OidcAuthMiddleware:
             return
 
         request = Request(scope, receive=receive)
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.lower().startswith("bearer "):
+        token = bearer_token(request)
+        if token is None:
             await reply_unauthorized(
                 scope, receive, send,
                 reason="missing bearer token",
@@ -158,7 +150,6 @@ class OidcAuthMiddleware:
             )
             return
 
-        token = auth_header.split(" ", 1)[1].strip()
         try:
             claims = await self._verify(token)
         except JoseError as exc:

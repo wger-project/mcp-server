@@ -26,9 +26,15 @@ import httpx
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .base import is_bypass_path, reply_forbidden, reply_unauthorized, reply_unavailable
+from .base import (
+    bearer_token,
+    is_bypass_path,
+    reply_forbidden,
+    reply_unauthorized,
+    reply_unavailable,
+    www_authenticate,
+)
 from .identity import Identity, reset_identity, set_identity
-from .oauth import WELL_KNOWN_PATH, forwarded_origin
 
 log = logging.getLogger(__name__)
 
@@ -197,16 +203,7 @@ class WgerBearerMiddleware:
         self._resolver = resolver or UsernameResolver(wger_base_url)
 
     def _www_authenticate(self, request: Request, *, error: str | None = None) -> str:
-        base = 'Bearer realm="wger-mcp"'
-        if error:
-            base += f', error="{error}"'
-        url = self._resource_metadata_url
-        if url is None:
-            origin = forwarded_origin(request)
-            url = origin + WELL_KNOWN_PATH if origin else None
-        if url:
-            base += f', resource_metadata="{url}"'
-        return base
+        return www_authenticate(request, self._resource_metadata_url, error=error)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -217,8 +214,8 @@ class WgerBearerMiddleware:
             return
 
         request = Request(scope, receive=receive)
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.lower().startswith("bearer "):
+        token = bearer_token(request)
+        if token is None:
             await reply_unauthorized(
                 scope, receive, send,
                 reason="missing bearer token",
@@ -226,7 +223,6 @@ class WgerBearerMiddleware:
             )
             return
 
-        token = auth_header.split(" ", 1)[1].strip()
         if not token:
             await reply_unauthorized(
                 scope, receive, send,

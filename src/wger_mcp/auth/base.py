@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .identity import Identity, reset_identity, set_identity
+from .oauth import WELL_KNOWN_PATH, forwarded_origin
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,40 @@ def is_bypass_path(path: str, extra: set[str] | None = None) -> bool:
         or path.startswith("/health/")
         or path.startswith("/.well-known/")
     )
+
+
+def bearer_token(request: Request) -> str | None:
+    """The token of an ``Authorization: Bearer`` header, or None without one."""
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return None
+    return header.split(" ", 1)[1].strip()
+
+
+def www_authenticate(
+    request: Request,
+    resource_metadata_url: str | None,
+    *,
+    error: str | None = None,
+    scope: str | None = None,
+) -> str:
+    """The Bearer challenge, pointing at the protected-resource metadata.
+
+    Without a pinned ``resource_metadata_url`` it is derived per request from
+    the forwarded headers.
+    """
+    challenge = 'Bearer realm="wger-mcp"'
+    if error:
+        challenge += f', error="{error}"'
+    if scope:
+        challenge += f', scope="{scope}"'
+    url = resource_metadata_url
+    if url is None:
+        origin = forwarded_origin(request)
+        url = origin + WELL_KNOWN_PATH if origin else None
+    if url:
+        challenge += f', resource_metadata="{url}"'
+    return challenge
 
 
 async def reply_unauthorized(
@@ -115,8 +150,8 @@ class StaticTokenMiddleware:
             return
 
         request = Request(scope, receive=receive)
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.lower().startswith("bearer "):
+        presented = bearer_token(request)
+        if presented is None:
             await reply_unauthorized(
                 scope, receive, send,
                 reason="missing bearer token",
@@ -124,7 +159,6 @@ class StaticTokenMiddleware:
             )
             return
 
-        presented = auth_header.split(" ", 1)[1].strip()
         # Constant-time compare so a wrong token leaks no timing signal.
         if not hmac.compare_digest(presented, self._token):
             log.warning("static token rejected")
