@@ -5,11 +5,17 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
-**Requires wger 2.7.** 
- 
-The 2.7 API renamed and retyped fields this server
+## 2.7.0
+
+**Requires wger 2.7.** The 2.7 API renamed and retyped fields this server
 writes to, so a single build cannot serve both releases. See below for what
 changed at the tool boundary.
+
+**Version numbers now follow wger**, as the `wger-api-client` package's do:
+major and minor name the wger release a build targets, so `2.7.x` is meant for
+a 2.7 server, and the patch number is this package's own. Hence the jump from
+0.2.0. A breaking change to the tools can land in a patch release; the entries
+below mark each one as **Breaking**.
 
 * The server reads wger's version once at startup and warns when it is older
   than the API client expects, naming both. A warning rather than a refusal:
@@ -236,9 +242,9 @@ changed at the tool boundary.
   settings: `MCP_WGER_SCOPES` (must include `api:read`), `MCP_AS_FACADE`,
   `OAUTH_REGISTER_PATH`. The facade's metadata lists wger's client
   authentication methods, `none` included, so public PKCE clients can
-  register. wger's discovery document is
-  read even when all three `OIDC_*` endpoint overrides are set; skipping it
-  used to switch off `/register` without a word. A `403 insufficient_scope`
+  register. wger's discovery document is read even when all three `OIDC_*`
+  endpoint overrides are set; skipping it used to switch off `/register`
+  without a word. A `403 insufficient_scope`
   names the scopes to request in its `WWW-Authenticate` header, where clients
   that step up an authorization look for them.
 
@@ -251,7 +257,7 @@ changed at the tool boundary.
   token_not_valid`, not `401`. A scope that `MCP_WGER_SCOPES` leaves out is
   reported as unavailable on the deployment rather than as a reason to
   re-authorize, which would only produce the same grant again.
-* **Fix:** the HTTP transport runs stateless. In a stateful MCP session every
+* **Fixed:** the HTTP transport runs stateless. In a stateful MCP session every
   tool call ran with the identity of the request that opened the session, so
   under `oidc` a caller could act on the session opener's wger account with the
   session id and any valid token of their own, and a refreshed token was never
@@ -261,7 +267,7 @@ changed at the tool boundary.
   half a minute, on connection errors and 5xx — and then exits with one line
   instead of a traceback. With `wger_oidc` the provider is wger itself, and a
   compose file starting both together made the server crash-loop.
-* **Fix:** with `MCP_AS_FACADE=false` the protected-resource metadata names the
+* **Fixed:** with `MCP_AS_FACADE=false` the protected-resource metadata names the
   provider's issuer exactly as its discovery document states it. A trailing
   slash used to be stripped, which broke the issuer comparison for Auth0-style
   issuers.
