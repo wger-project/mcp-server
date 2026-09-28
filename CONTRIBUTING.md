@@ -32,9 +32,10 @@ src/wger_mcp/
 ├── auth/
 │   ├── __init__.py    # build_auth_middleware / build_token_provider factories
 │   ├── base.py        # shared helpers, NoAuthMiddleware, StaticTokenMiddleware
+│   ├── wger_oidc.py   # inbound: wger's own opaque token, carried through
 │   ├── oidc.py        # inbound OIDC token validation against the IdP's JWKS
-│   ├── oidc_discovery.py  # resolves JWKS/token endpoints from the issuer
-│   ├── exchange.py    # RFC 8693 token exchange → wger JWT
+│   ├── oidc_discovery.py  # resolves the provider's endpoints from its issuer
+│   ├── exchange.py    # outbound credential: pass-through, exchange or API key
 │   ├── asfacade.py    # OAuth authorization-server facade (see ADR 0003)
 │   ├── identity.py    # per-request identity (contextvar)
 │   └── oauth.py       # OAuth protected-resource metadata

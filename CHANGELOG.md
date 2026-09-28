@@ -206,6 +206,65 @@ changed at the tool boundary.
   already existed for `set_slot_entry_config`; this reaches it from the
   high-level authoring call.
 
+* New inbound auth strategy `MCP_AUTH=wger_oidc` for **wger >= 2.7**, which is
+  itself an OAuth2/OIDC provider whose REST API accepts the tokens it issues.
+  The server becomes a plain resource server: the caller's wger token goes back
+  out on the API call unchanged. No identity provider, no client credentials, no
+  token exchange — `WGER_BASE_URL` is the whole configuration. Because the login
+  runs in the user's browser on wger's own login page, **MFA enrolled in wger
+  works**, which the token-exchange mode could never support. See
+  [ADR 0005](docs/adr/0005-native-wger-oidc.md).
+
+  The token is checked with wger (`/api/v2/userprofile/`, cached for a minute),
+  so a dead one is answered with `401 invalid_token` — the answer that makes an
+  MCP client refresh it. If wger cannot be reached the answer is `503`, which
+  leaves the client's token alone. At most 32 checks run against wger at once
+  (past that: `503`), and a refused token is remembered for 10 seconds, so a
+  flood of made-up bearers cannot turn into a flood of requests to wger.
+
+  `MCP_AUTH` still defaults to `oidc`, so nothing changes for an existing
+  deployment; wger >= 2.7 deployments should set `wger_oidc` explicitly.
+
+* The authorization-server facade serves both OAuth modes, and under `wger_oidc`
+  it adds wger's `api:read`/`api:write` scopes to the `/authorize` query and to
+  a proxied dynamic client registration. A generic MCP client asks for `openid`
+  alone, which wger then refuses with `invalid_scope` — a dead connector with no
+  diagnosable cause. `/register` is advertised and proxied exactly when wger has
+  dynamic client registration switched on. It also drops the RFC 8707
+  `resource` parameter from `/authorize` and `/token`: MCP clients name this
+  server there, and wger refuses a token bound to it on every API call. New
+  settings: `MCP_WGER_SCOPES` (must include `api:read`), `MCP_AS_FACADE`,
+  `OAUTH_REGISTER_PATH`. The facade's metadata lists wger's client
+  authentication methods, `none` included, so public PKCE clients can
+  register. wger's discovery document is
+  read even when all three `OIDC_*` endpoint overrides are set; skipping it
+  used to switch off `/register` without a word. A `403 insufficient_scope`
+  names the scopes to request in its `WWW-Authenticate` header, where clients
+  that step up an authorization look for them.
+
+* Tool errors distinguish the two upstream failures a retry cannot fix. A
+  rejected token now carries a hint that the connection has to be authorized
+  again, and a missing scope names the scope — an agent that saw only the status
+  code retried until it gave up, and a user who had granted `api:read` alone
+  watched every write tool fail opaquely. Both are recognised by wger's error
+  body, since wger answers an expired or revoked token with `403
+  token_not_valid`, not `401`. A scope that `MCP_WGER_SCOPES` leaves out is
+  reported as unavailable on the deployment rather than as a reason to
+  re-authorize, which would only produce the same grant again.
+* **Fix:** the HTTP transport runs stateless. In a stateful MCP session every
+  tool call ran with the identity of the request that opened the session, so
+  under `oidc` a caller could act on the session opener's wger account with the
+  session id and any valid token of their own, and a refreshed token was never
+  used. Clients no longer receive an `mcp-session-id`; nothing on this server
+  needed one.
+* OIDC discovery at startup waits for a provider that is not up yet — about
+  half a minute, on connection errors and 5xx — and then exits with one line
+  instead of a traceback. With `wger_oidc` the provider is wger itself, and a
+  compose file starting both together made the server crash-loop.
+* **Fix:** with `MCP_AS_FACADE=false` the protected-resource metadata names the
+  provider's issuer exactly as its discovery document states it. A trailing
+  slash used to be stripped, which broke the issuer comparison for Auth0-style
+  issuers.
 * **Breaking (response shape):** `add_exercise_with_sets` returns the ids
   flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
   one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of
@@ -227,8 +286,8 @@ changed at the tool boundary.
   `ALLOWED_HOSTS=a,b` in `.env` used to abort startup with a parse error, since
   only the process environment was rewritten to the JSON form the settings
   loader understands. Affected `ALLOWED_HOSTS`, `MCP_TOOLS`,
-  `MCP_OIDC_ALGORITHMS` and `MCP_OIDC_ALLOWED_USERS`; the JSON spelling keeps
-  working.
+  `MCP_OIDC_ALGORITHMS`, `MCP_OIDC_ALLOWED_USERS` and `MCP_WGER_SCOPES`; the
+  JSON spelling keeps working.
 
 ## 0.2.0
 

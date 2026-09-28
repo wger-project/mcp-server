@@ -17,6 +17,8 @@ from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.types import UNSET, Unset
 
 from ..api_client import REQUEST_TIMEOUT_SECONDS, paginate
+from ..auth.identity import current_identity
+from ..auth.wger_oidc import missing_scope, token_rejected
 
 T = TypeVar("T")
 
@@ -76,14 +78,53 @@ def bad_request(detail: str) -> dict[str, Any]:
     return {"error": True, "status": 400, "detail": detail}
 
 
+_REAUTH_HINT = (
+    "wger rejected the credential this server sent. If this connection was "
+    "authorized over OAuth, its access token has expired or been revoked and "
+    "the connection has to be authorized again — retrying will fail the same way."
+)
+
+
+def _scope_hint(detail: Any) -> str | None:
+    """The re-authorization hint for a 403, when it is a missing scope."""
+    scope = missing_scope(detail)
+    if not scope:
+        return None
+    identity = current_identity()
+    if identity is not None and identity.requested_scopes and (
+        scope not in identity.requested_scopes
+    ):
+        # Re-authorizing cannot help: the facade never asks for this scope.
+        return (
+            f'wger refused this call because it needs the "{scope}" scope, which '
+            f"this server is configured not to request (MCP_WGER_SCOPES). The "
+            f"operation is not available on this deployment."
+        )
+    return (
+        f"wger refused this call because the connection was authorized without "
+        f'the "{scope}" scope. It has to be authorized again with that '
+        f"scope granted — retrying will fail the same way."
+    )
+
+
 def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
-    """Shape an upstream failure as a tool-response dict."""
+    """Shape an upstream failure as a tool-response dict.
+
+    A rejected token or a missing scope carries a ``hint`` on top of the raw
+    status: those two are the only upstream failures a *retry* cannot fix, and
+    the caller — usually a model — cannot tell them from the transient ones.
+    """
     if isinstance(exc, UnexpectedStatus):
         try:
             detail: Any = json.loads(exc.content)
         except ValueError:
             detail = exc.content.decode(errors="replace")
-        return {"error": True, "status": exc.status_code, "detail": detail}
+        out: dict[str, Any] = {"error": True, "status": exc.status_code, "detail": detail}
+        if token_rejected(exc.status_code, detail):
+            out["hint"] = _REAUTH_HINT
+        elif exc.status_code == 403 and (hint := _scope_hint(detail)):
+            out["hint"] = hint
+        return out
     return {"error": True, "status": 503, "detail": _transport_detail(exc)}
 
 
