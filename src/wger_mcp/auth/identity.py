@@ -21,7 +21,8 @@ class Identity:
 
     ``subject`` is the stable cache key (IdP ``sub``). ``username`` is the
     human-facing name. ``inbound_token`` is the raw SSO token to be exchanged
-    for a wger credential; it is ``None`` in dev mode.
+    for a wger credential; it is ``None`` in dev mode. ``requested_scopes`` is
+    what this server asks the provider for (``wger_oidc`` only).
     """
 
     subject: str
@@ -29,6 +30,7 @@ class Identity:
     inbound_token: str | None = None
     strategy: str = "oidc"
     claims: dict[str, Any] = field(default_factory=dict)
+    requested_scopes: frozenset[str] = frozenset()
 
 
 _current: ContextVar[Identity | None] = ContextVar("wger_mcp_identity", default=None)

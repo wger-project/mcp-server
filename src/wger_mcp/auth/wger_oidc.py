@@ -203,6 +203,7 @@ class WgerBearerMiddleware:
         # has to ask for. The whole set, since a grant of the missing one alone
         # would lose the rest.
         self._scopes = " ".join(scopes) if scopes else None
+        self._requested = frozenset(scopes or ())
         self._resource_metadata_url = resource_metadata_url
         self._public_paths = public_paths or set()
         self._resolver = resolver or UsernameResolver(wger_base_url)
@@ -282,6 +283,7 @@ class WgerBearerMiddleware:
                 username=username,
                 inbound_token=token,
                 strategy="wger_oidc",
+                requested_scopes=self._requested,
             )
         )
         try:

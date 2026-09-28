@@ -17,6 +17,7 @@ from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.types import UNSET, Unset
 
 from ..api_client import REQUEST_TIMEOUT_SECONDS, paginate
+from ..auth.identity import current_identity
 from ..auth.wger_oidc import missing_scope, token_rejected
 
 T = TypeVar("T")
@@ -89,6 +90,16 @@ def _scope_hint(detail: Any) -> str | None:
     scope = missing_scope(detail)
     if not scope:
         return None
+    identity = current_identity()
+    if identity is not None and identity.requested_scopes and (
+        scope not in identity.requested_scopes
+    ):
+        # Re-authorizing cannot help: the facade never asks for this scope.
+        return (
+            f'wger refused this call because it needs the "{scope}" scope, which '
+            f"this server is configured not to request (MCP_WGER_SCOPES). The "
+            f"operation is not available on this deployment."
+        )
     return (
         f"wger refused this call because the connection was authorized without "
         f'the "{scope}" scope. It has to be authorized again with that '

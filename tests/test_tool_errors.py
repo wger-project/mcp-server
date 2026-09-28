@@ -12,6 +12,7 @@ from wger_api_client import models as api_models
 from wger_api_client.errors import UnexpectedStatus
 
 from wger_mcp.api_client import build_api_client
+from wger_mcp.auth.identity import Identity, reset_identity, set_identity
 from wger_mcp.config import Settings
 from wger_mcp.tools import exercises, routines
 from wger_mcp.tools.common import api_list_tool, api_tool
@@ -157,6 +158,31 @@ async def test_a_missing_scope_names_the_scope() -> None:
     out = await tool()
     assert out["status"] == 403
     assert "api:write" in out["hint"]
+
+
+@pytest.mark.asyncio
+async def test_a_scope_the_server_never_requests_is_not_sent_to_re_authorize() -> None:
+    """A read-only deployment (MCP_WGER_SCOPES without api:write): re-authorizing
+    yields the same read-only grant, so a hint to do it is a loop."""
+
+    @api_tool
+    async def tool() -> dict[str, Any]:
+        raise UnexpectedStatus(403, json.dumps(wger_missing_scope("api:write")).encode())
+
+    ctx = set_identity(
+        Identity(
+            subject="fp",
+            inbound_token="t",
+            strategy="wger_oidc",
+            requested_scopes=frozenset({"openid", "api:read"}),
+        )
+    )
+    try:
+        out = await tool()
+    finally:
+        reset_identity(ctx)
+    assert "configured not to request" in out["hint"]
+    assert "authorized again" not in out["hint"]
 
 
 @pytest.mark.asyncio
