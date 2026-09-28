@@ -150,6 +150,7 @@ def build_auth_middleware(
                 "allowed_users": set(s.mcp_oidc_allowed_users),
                 "resource_metadata_url": metadata_url,
                 "public_paths": _facade_paths(s),
+                "scopes": s.mcp_wger_scopes,
             }
         case AuthStrategy.oidc:
             jwks_uri = _endpoints(s, endpoints).jwks_uri

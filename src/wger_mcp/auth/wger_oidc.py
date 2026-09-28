@@ -194,16 +194,23 @@ class WgerBearerMiddleware:
         allowed_users: set[str] | None = None,
         resource_metadata_url: str | None = None,
         public_paths: set[str] | None = None,
+        scopes: list[str] | None = None,
         resolver: UsernameResolver | None = None,
     ) -> None:
         self.app = app
         self._allowed = allowed_users or set()
+        # Named in the insufficient_scope challenge: what a client re-authorizing
+        # has to ask for. The whole set, since a grant of the missing one alone
+        # would lose the rest.
+        self._scopes = " ".join(scopes) if scopes else None
         self._resource_metadata_url = resource_metadata_url
         self._public_paths = public_paths or set()
         self._resolver = resolver or UsernameResolver(wger_base_url)
 
-    def _www_authenticate(self, request: Request, *, error: str | None = None) -> str:
-        return www_authenticate(request, self._resource_metadata_url, error=error)
+    def _www_authenticate(
+        self, request: Request, *, error: str | None = None, scope: str | None = None
+    ) -> str:
+        return www_authenticate(request, self._resource_metadata_url, error=error, scope=scope)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -246,7 +253,9 @@ class WgerBearerMiddleware:
             await reply_forbidden(
                 scope, receive, send,
                 reason=str(exc),
-                www_authenticate=self._www_authenticate(request, error="insufficient_scope"),
+                www_authenticate=self._www_authenticate(
+                    request, error="insufficient_scope", scope=self._scopes or exc.scope
+                ),
             )
             return
         except httpx.HTTPError as exc:

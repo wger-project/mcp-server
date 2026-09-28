@@ -203,6 +203,8 @@ def test_a_grant_without_api_read_is_a_403(mock_wger_oidc: respx.MockRouter) -> 
         r = c.post("/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"})
         assert r.status_code == 403
         assert 'error="insufficient_scope"' in r.headers["www-authenticate"]
+        # RFC 6750: what to ask for when re-authorizing (MCP step-up)
+        assert 'scope="openid api:read api:write"' in r.headers["www-authenticate"]
         assert "api:read" in r.json()["reason"]
 
 
