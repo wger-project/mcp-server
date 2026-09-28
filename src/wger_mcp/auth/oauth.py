@@ -55,7 +55,21 @@ def resource_metadata_url(settings: Settings, *, origin: str | None = None) -> s
     return resource_identifier(settings, origin=origin) + WELL_KNOWN_PATH
 
 
-def authorization_server(settings: Settings, *, origin: str | None = None) -> str:
+def issuer_url(settings: Settings) -> str | None:
+    """The configured issuer of the tokens this server accepts.
+
+    Under ``wger_oidc`` that is wger itself, which is why the mode needs no
+    configuration beyond ``WGER_BASE_URL``.
+    """
+    if settings.mcp_auth is AuthStrategy.wger_oidc:
+        # allauth's issuer carries no trailing slash; HttpUrl adds one to a host
+        return str(settings.wger_base_url).rstrip("/")
+    return str(settings.oidc_issuer) if settings.oidc_issuer else None
+
+
+def authorization_server(
+    settings: Settings, *, origin: str | None = None, issuer: str | None = None
+) -> str | None:
     """Which origin clients should run the OAuth flow against.
 
     Normally this server itself: it fronts the provider as an AS facade (see
@@ -63,23 +77,23 @@ def authorization_server(settings: Settings, *, origin: str | None = None) -> st
     ``/token`` against the MCP origin regardless of what is advertised here, and
     a facade is also what lets a private IdP stay private.
 
-    ``MCP_AS_FACADE=false`` points at the real provider instead — honest, and
-    one hop shorter, for a deployment whose clients all follow the pointer.
+    ``MCP_AS_FACADE=false`` points at the real provider instead. Clients compare
+    that value with the provider's own ``issuer`` exactly (RFC 8414), so the
+    discovered ``issuer`` wins over the configured URL.
     """
     if settings.mcp_as_facade:
         return resource_identifier(settings, origin=origin)
-    issuer = (
-        settings.wger_base_url
-        if settings.mcp_auth is AuthStrategy.wger_oidc
-        else settings.oidc_issuer
-    )
-    return str(issuer).rstrip("/")
+    return issuer or issuer_url(settings)
 
 
-def protected_resource_metadata(settings: Settings, *, origin: str | None = None) -> dict:
+def protected_resource_metadata(
+    settings: Settings, *, origin: str | None = None, issuer: str | None = None
+) -> dict:
     meta = {
         "resource": resource_identifier(settings, origin=origin),
-        "authorization_servers": [authorization_server(settings, origin=origin)],
+        "authorization_servers": [
+            authorization_server(settings, origin=origin, issuer=issuer)
+        ],
         "bearer_methods_supported": ["header"],
     }
     # Only under wger_oidc do we know what the token has to carry: there the

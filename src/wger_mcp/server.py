@@ -178,7 +178,11 @@ def build_app(settings: Settings) -> Starlette:
 
     async def oauth_metadata(request: Request) -> JSONResponse:
         origin = forwarded_origin(request)
-        return JSONResponse(protected_resource_metadata(settings, origin=origin))
+        return JSONResponse(
+            protected_resource_metadata(
+                settings, origin=origin, issuer=endpoints.issuer if endpoints else None
+            )
+        )
 
     async def as_metadata(request: Request) -> JSONResponse:
         origin = resource_identifier(settings, origin=forwarded_origin(request))

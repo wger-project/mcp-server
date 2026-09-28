@@ -232,7 +232,7 @@ To support this, the server exposes a thin **AS facade** in both OAuth modes (`w
 
 The facade paths default to the conventional `/authorize`, `/token` and `/register` — clients like claude.ai assume those and ignore the `authorization_endpoint` in the AS metadata. Override with `OAUTH_AUTHORIZE_PATH` / `OAUTH_TOKEN_PATH` / `OAUTH_REGISTER_PATH` if a client expects something else (no rebuild needed).
 
-Set `MCP_AS_FACADE=false` to switch the facade off entirely: the metadata then names the provider directly and this origin serves no OAuth endpoints. Correct only if every client you care about follows the `authorization_servers` pointer — claude.ai does not.
+Set `MCP_AS_FACADE=false` to switch the facade off entirely: the metadata then names the provider directly and this origin serves no OAuth endpoints. Correct only if every client you care about follows the `authorization_servers` pointer — claude.ai does not. The pointer is the provider's issuer as its discovery document states it, so under `wger_oidc` `WGER_BASE_URL` has to be wger's public URL for this to work.
 
 #### Scopes and registration under `wger_oidc`
 

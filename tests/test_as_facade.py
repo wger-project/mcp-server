@@ -278,6 +278,25 @@ def test_an_external_idp_advertises_secret_based_client_auth(
         ]
 
 
+def test_without_the_facade_the_discovered_issuer_is_advertised() -> None:
+    """Clients compare the pointer with the provider's `issuer` exactly. Auth0's
+    ends in a slash, which used to be stripped."""
+    issuer = "https://tenant.auth0.test/"
+    doc = {
+        "issuer": issuer,
+        "jwks_uri": f"{issuer}.well-known/jwks.json",
+        "token_endpoint": f"{issuer}oauth/token",
+        "authorization_endpoint": f"{issuer}authorize",
+    }
+    env = {k: v for k, v in OIDC_ENV.items() if not k.endswith(("_URI", "_ENDPOINT"))}
+    env.update(OIDC_ISSUER=issuer, MCP_AS_FACADE="false")
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{issuer}.well-known/openid-configuration").respond(json=doc)
+        with make_client(**env) as c:
+            body = c.get("/.well-known/oauth-protected-resource").json()
+    assert body["authorization_servers"] == [issuer]
+
+
 def test_an_external_idp_keeps_resource(mock_jwks: respx.MockRouter) -> None:
     """The external IdP mints a token for this server, which is what RFC 8707
     is for; only the pass-through mode has to drop it."""

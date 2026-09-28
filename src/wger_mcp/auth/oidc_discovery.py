@@ -40,6 +40,7 @@ class OidcEndpoints(NamedTuple):
     authorization_endpoint: str
     registration_endpoint: str | None = None
     token_endpoint_auth_methods: list[str] | None = None
+    issuer: str | None = None
 
 
 def discover_endpoints(
@@ -79,6 +80,7 @@ def discover_endpoints(
         resolved_authz,
         doc.get("registration_endpoint"),
         doc.get("token_endpoint_auth_methods_supported"),
+        doc.get("issuer") if isinstance(doc.get("issuer"), str) else None,
     )
 
 

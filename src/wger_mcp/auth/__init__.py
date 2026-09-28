@@ -35,6 +35,7 @@ from .oauth import (
     WELL_KNOWN_PATH,
     authorization_server,
     forwarded_origin,
+    issuer_url,
     protected_resource_metadata,
     resource_identifier,
     resource_metadata_url,
@@ -78,17 +79,6 @@ _OAUTH_STRATEGIES = frozenset({AuthStrategy.wger_oidc, AuthStrategy.oidc})
 def uses_oauth(settings: Settings) -> bool:
     """Whether callers authenticate against an OAuth provider under this strategy."""
     return settings.mcp_auth in _OAUTH_STRATEGIES and issuer_url(settings) is not None
-
-
-def issuer_url(settings: Settings) -> str | None:
-    """The provider that issues the tokens this server accepts.
-
-    Under ``wger_oidc`` that is wger itself, which is why the mode needs no
-    configuration beyond ``WGER_BASE_URL``.
-    """
-    if settings.mcp_auth is AuthStrategy.wger_oidc:
-        return str(settings.wger_base_url)
-    return str(settings.oidc_issuer) if settings.oidc_issuer else None
 
 
 def resolve_endpoints(s: Settings) -> OidcEndpoints | None:
