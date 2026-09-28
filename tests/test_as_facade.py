@@ -212,6 +212,65 @@ def test_the_rest_of_the_authorization_query_survives(
         assert q["response_type"] == ["code"]
 
 
+def test_resource_is_not_forwarded_to_wger_at_authorize(
+    mock_wger_oidc: respx.MockRouter,
+) -> None:
+    """MCP clients send resource=<this server> (RFC 8707). wger binds the token
+    to it and then refuses it on /api/v2/ with "Invalid target resource"."""
+    with _wger_client() as c:
+        r = c.get(
+            "/authorize?client_id=x&scope=openid+api%3Aread+api%3Awrite"
+            "&resource=https%3A%2F%2Fmcp.test%2Fmcp&state=s",
+            follow_redirects=False,
+        )
+        q = parse_qs(urlparse(r.headers["location"]).query)
+        assert "resource" not in q
+        assert q["client_id"] == ["x"] and q["state"] == ["s"]
+
+
+def test_resource_is_not_forwarded_to_wger_at_token(mock_wger_oidc: respx.MockRouter) -> None:
+    """allauth binds the token to a resource named here even when the
+    authorization request carried none — and on every refresh as well."""
+    route = mock_wger_oidc.post(WGER_TOKEN).respond(json={"access_token": "AT"})
+    with _wger_client() as c:
+        c.post(
+            "/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": "rt",
+                "resource": "https://mcp.test/mcp",
+            },
+        )
+    sent = parse_qs(route.calls.last.request.content.decode())
+    assert "resource" not in sent
+    assert sent["refresh_token"] == ["rt"]
+
+
+def test_a_token_request_without_resource_is_forwarded_byte_for_byte(
+    mock_wger_oidc: respx.MockRouter,
+) -> None:
+    route = mock_wger_oidc.post(WGER_TOKEN).respond(json={"access_token": "AT"})
+    body = b"grant_type=authorization_code&code=c&redirect_uri=https%3A%2F%2Fx%2Fcb"
+    with _wger_client() as c:
+        c.post(
+            "/token",
+            content=body,
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert route.calls.last.request.content == body
+
+
+def test_an_external_idp_keeps_resource(mock_jwks: respx.MockRouter) -> None:
+    """The external IdP mints a token for this server, which is what RFC 8707
+    is for; only the pass-through mode has to drop it."""
+    with _client() as c:
+        r = c.get(
+            "/authorize?client_id=x&resource=https%3A%2F%2Fmcp.test%2Fmcp",
+            follow_redirects=False,
+        )
+        assert r.headers["location"].endswith("resource=https%3A%2F%2Fmcp.test%2Fmcp")
+
+
 def test_an_external_idp_gets_its_query_untouched(mock_jwks: respx.MockRouter) -> None:
     """Only wger_oidc knows the scope names; with an external IdP the deployment
     configured the client and this server has no business editing the request."""

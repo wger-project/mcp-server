@@ -14,9 +14,9 @@ bearer at all) and leaves the rest to wger.
 
 Two consequences follow, and both are handled here:
 
-- **A bad token is only noticed at the first API call.** Its 401 has to reach
-  the client as "re-authenticate" rather than as a tool error; see
-  ``tools/common.api_err``.
+- **A bad token is only noticed at the first API call.** wger's refusal has to
+  reach the client as "re-authenticate" rather than as a plain tool error; see
+  :func:`token_rejected` and ``tools/common.api_err``.
 - **The caller has no name until someone asks wger for it.** Nothing in the
   request path needs one except the optional allowlist, so it is fetched only
   where that makes it necessary, once per token, and cached — keyed by a
@@ -28,7 +28,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 from collections import OrderedDict
+from typing import Any
 
 import httpx
 from starlette.requests import Request
@@ -64,8 +66,38 @@ def token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
+#: wger's 403 for a grant without the scope: 'The access token is missing the
+#: "api:write" scope.'
+_MISSING_SCOPE = re.compile(r'missing the ["\'](api:[a-z]+)["\'] scope')
+
+
+def missing_scope(detail: Any) -> str | None:
+    """The scope a wger error body names as missing, if that is its complaint."""
+    match = _MISSING_SCOPE.search(str(detail))
+    return match.group(1) if match else None
+
+
+def token_rejected(status: int, detail: Any) -> bool:
+    """Whether wger refused the token itself (expired, revoked, unknown).
+
+    wger says so with a 403, not a 401: SessionAuthentication heads its DRF
+    authentication classes, and DRF then turns every 401 into a 403. What
+    marks it is simplejwt's ``token_not_valid``, the last class in the chain.
+    """
+    if status == 401:
+        return True
+    return status == 403 and isinstance(detail, dict) and detail.get("code") == "token_not_valid"
+
+
+def _error_body(resp: httpx.Response) -> Any:
+    try:
+        return resp.json()
+    except ValueError:
+        return resp.text
+
+
 class InvalidTokenError(Exception):
-    """wger rejected the token outright (401)."""
+    """wger does not accept the token."""
 
 
 class InsufficientScopeError(Exception):
@@ -128,10 +160,13 @@ class UsernameResolver:
                 self._url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             )
-        if resp.status_code == 401:
+        if resp.status_code in (401, 403):
+            # The user's own profile has no permission check beyond the token,
+            # so a 403 that names no scope means the token is no good here —
+            # expired, revoked, or bound to another resource.
+            if scope := missing_scope(_error_body(resp)):
+                raise InsufficientScopeError(scope)
             raise InvalidTokenError
-        if resp.status_code == 403:
-            raise InsufficientScopeError("api:read")
         resp.raise_for_status()
         try:
             payload = resp.json()

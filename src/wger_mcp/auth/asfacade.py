@@ -88,6 +88,7 @@ class AuthorizationServerFacade:
         register_path: str = REGISTER_PATH,
         required_scopes: list[str] | None = None,
         advertised_scopes: list[str] | None = None,
+        strip_resource: bool = False,
         timeout: float = 15.0,
     ) -> None:
         self._idp_authorize = idp_authorization_endpoint
@@ -100,6 +101,9 @@ class AuthorizationServerFacade:
         # was told to accept, so it forwards whatever the client asked for.
         self._required_scopes = required_scopes or []
         self._advertised_scopes = advertised_scopes or _DEFAULT_SCOPES
+        # MCP clients send `resource=<this server>` (RFC 8707). wger binds the
+        # token to it and then refuses it on its own API ("Invalid target resource").
+        self._strip_resource = strip_resource
         self._client = httpx.AsyncClient(timeout=timeout)
 
     @property
@@ -139,21 +143,23 @@ class AuthorizationServerFacade:
         against the real client and redirects straight back to the client's
         registered redirect_uri afterwards.
 
-        The one thing that may be rewritten is ``scope``, and only to *add* the
-        scopes this server cannot work without (see the module docstring). The
-        query is left byte-for-byte alone whenever they are already there, which
-        is every request in external-IdP mode.
+        Under ``wger_oidc`` ``scope`` gets the missing API scopes added (see the
+        module docstring) and ``resource`` is dropped. Otherwise the query is
+        left byte-for-byte alone, which is every request in external-IdP mode.
         """
         qs = request.url.query
-        if self._required_scopes:
+        if self._required_scopes or self._strip_resource:
             params = parse_qsl(qs, keep_blank_values=True)
-            scope = next((v for k, v in params if k == "scope"), None)
-            merged = _merge_scopes(scope, self._required_scopes)
-            if merged != scope:
-                log.debug("authorize: scope %r → %r", scope, merged)
-                params = [(k, v) for k, v in params if k != "scope"]
-                params.append(("scope", merged))
-                qs = urlencode(params)
+            rewritten = self._without_resource(params)
+            if self._required_scopes:
+                scope = next((v for k, v in rewritten if k == "scope"), None)
+                merged = _merge_scopes(scope, self._required_scopes)
+                if merged != scope:
+                    log.debug("authorize: scope %r → %r", scope, merged)
+                    rewritten = [(k, v) for k, v in rewritten if k != "scope"]
+                    rewritten.append(("scope", merged))
+            if rewritten != params:
+                qs = urlencode(rewritten)
         target = self._idp_authorize + (f"?{qs}" if qs else "")
         return RedirectResponse(target, status_code=302)
 
@@ -162,10 +168,27 @@ class AuthorizationServerFacade:
 
         Forwards the urlencoded body plus the content-type, the client's
         Authorization header (client_secret_basic) and Accept, then returns the
-        response unchanged. Client authentication is the provider's job.
+        response unchanged. Client authentication is the provider's job. Only
+        ``resource`` is dropped under ``wger_oidc``: allauth binds the token to
+        a resource named here even when the authorization request had none.
         """
         body = await request.body()
+        if self._strip_resource:
+            body = self._token_body_without_resource(body)
         return await self._proxy(self._idp_token, request, body, what="token")
+
+    def _without_resource(self, params: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        if not self._strip_resource:
+            return params
+        return [(k, v) for k, v in params if k != "resource"]
+
+    def _token_body_without_resource(self, body: bytes) -> bytes:
+        try:
+            params = parse_qsl(body.decode("utf-8"), keep_blank_values=True)
+        except UnicodeDecodeError:
+            return body
+        kept = self._without_resource(params)
+        return body if kept == params else urlencode(kept).encode("ascii")
 
     async def register(self, request: Request) -> Response:
         """Back-channel: reverse-proxy dynamic client registration (RFC 7591).

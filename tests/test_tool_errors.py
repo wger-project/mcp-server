@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -14,6 +15,8 @@ from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings
 from wger_mcp.tools import exercises, routines
 from wger_mcp.tools.common import api_list_tool, api_tool
+
+from .conftest import WGER_TOKEN_NOT_VALID, wger_missing_scope
 
 
 class _StubProvider:
@@ -118,17 +121,27 @@ async def test_list_tools_wrap_the_error_in_a_list() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_expired_token_is_reported_as_needing_re_authentication() -> None:
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        # What wger actually sends for an expired or revoked token
+        (403, WGER_TOKEN_NOT_VALID),
+        (401, {"detail": "Invalid token."}),
+    ],
+)
+async def test_an_expired_token_is_reported_as_needing_re_authentication(
+    status: int, body: dict
+) -> None:
     """A model that gets a bare 401 retries. Under wger_oidc the token is the
     caller's own and a retry cannot mint a new one, so the response has to say
     that the connection itself must be authorized again."""
 
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise UnexpectedStatus(401, b'{"detail": "Invalid token."}')
+        raise UnexpectedStatus(status, json.dumps(body).encode())
 
     out = await tool()
-    assert out["status"] == 401
+    assert out["status"] == status
     assert "authorized again" in out["hint"]
 
 
@@ -139,9 +152,7 @@ async def test_a_missing_scope_names_the_scope() -> None:
 
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise UnexpectedStatus(
-            403, b'{"detail": "The access token is missing the \\"api:write\\" scope."}'
-        )
+        raise UnexpectedStatus(403, json.dumps(wger_missing_scope("api:write")).encode())
 
     out = await tool()
     assert out["status"] == 403

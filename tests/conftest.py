@@ -27,6 +27,22 @@ WGER_REGISTER = f"{WGER_BASE}/identity/o/api/clients"
 #: Where the wger_oidc middleware asks who the bearer of a token is.
 WGER_USERPROFILE = f"{WGER_BASE}/api/v2/userprofile/"
 
+#: wger's 403 bodies for its own OAuth tokens, as measured against wger 2.7.
+#: Never a 401: SessionAuthentication heads its DRF authentication classes.
+WGER_TOKEN_NOT_VALID = {
+    "detail": "Given token not valid for any token type",
+    "code": "token_not_valid",
+    "messages": [
+        {"token_class": "AccessToken", "token_type": "access", "message": "Token is invalid"}
+    ],
+}
+WGER_INVALID_RESOURCE = {"detail": "Invalid target resource."}
+
+
+def wger_missing_scope(scope: str) -> dict[str, str]:
+    return {"detail": f'The access token is missing the "{scope}" scope.'}
+
+
 #: Env for MCP_AUTH=wger_oidc — deliberately nothing but the strategy: wger
 #: issues the tokens, so there are no client credentials to configure.
 WGER_OIDC_ENV = {"MCP_AUTH": "wger_oidc"}

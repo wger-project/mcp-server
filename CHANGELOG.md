@@ -223,14 +223,24 @@ changed at the tool boundary.
   a proxied dynamic client registration. A generic MCP client asks for `openid`
   alone, which wger then refuses with `invalid_scope` — a dead connector with no
   diagnosable cause. `/register` is advertised and proxied exactly when wger has
-  dynamic client registration switched on. New settings: `MCP_WGER_SCOPES`,
-  `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`.
+  dynamic client registration switched on. It also drops the RFC 8707
+  `resource` parameter from `/authorize` and `/token`: MCP clients name this
+  server there, and wger refuses a token bound to it on every API call. New
+  settings: `MCP_WGER_SCOPES`, `MCP_AS_FACADE`, `OAUTH_REGISTER_PATH`.
 
-* Tool errors distinguish the two upstream failures a retry cannot fix. A `401`
-  now carries a hint that the connection has to be authorized again, and a `403`
-  names the scope the grant is missing — an agent that saw only the status code
-  retried until it gave up, and a user who had granted `api:read` alone watched
-  every write tool fail opaquely.
+* Tool errors distinguish the two upstream failures a retry cannot fix. A
+  rejected token now carries a hint that the connection has to be authorized
+  again, and a missing scope names the scope — an agent that saw only the status
+  code retried until it gave up, and a user who had granted `api:read` alone
+  watched every write tool fail opaquely. Both are recognised by wger's error
+  body, since wger answers an expired or revoked token with `403
+  token_not_valid`, not `401`.
+* **Fix:** the HTTP transport runs stateless. In a stateful MCP session every
+  tool call ran with the identity of the request that opened the session, so
+  under `oidc` a caller could act on the session opener's wger account with the
+  session id and any valid token of their own, and a refreshed token was never
+  used. Clients no longer receive an `mcp-session-id`; nothing on this server
+  needed one.
 * **Breaking (response shape):** `add_exercise_with_sets` returns the ids
   flat — `slot_id`, `slot_entry_id`, `sets_config_id`, … — instead of 0.2.0's
   one-key sub-dicts (`{"slot": {"id": ...}}`). The nesting was a vestige of

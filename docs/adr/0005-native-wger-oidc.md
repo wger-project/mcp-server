@@ -76,6 +76,15 @@ API is gated behind `api:read`/`api:write`:
   knows which scopes it needs and is the party the client believes it is
   registering with, so it is the right place to add them. Nothing is hidden from
   the user by that: what the facade adds is what the consent screen names.
+- **`resource` is dropped** from `/authorize` and `/token`. MCP clients send
+  `resource=<this server>` (RFC 8707), allauth binds the token to it, and wger's
+  API then refuses that token with 403 "Invalid target resource" — on every
+  call. It has to go from `/token` too: allauth binds a resource named there
+  even when the authorization request had none, including on refresh. Rewriting
+  it to wger's API URL instead was rejected: allauth compares against the URL as
+  Django rebuilds it, and behind a proxy a scheme mismatch alone would bring
+  the 403 back. With an external IdP `resource` is passed through, since there
+  the token is meant for this server.
 
 ### Identity is resolved lazily, keyed by a fingerprint
 
@@ -87,14 +96,35 @@ only `api:read`, rather than from OIDC `userinfo`, which would need the
 key and the identity's subject are a SHA-256 prefix of the token; the raw token
 is never logged and never used as a key.
 
-### 401 and 403 are mapped, not passed through raw
+### Rejections are classified by body, not status
 
-A model that receives a bare `401` retries, and the retry fails identically:
-the token is the caller's own, and only a new authorization can produce a live
-one. So `api_err` attaches a hint saying the connection must be authorized
-again. For a `403`, wger's body names the missing scope, and the hint repeats
-it — a user who granted only `api:read` would otherwise watch every write tool
-fail opaquely.
+wger never answers its own tokens with `401`: `SessionAuthentication` heads its
+DRF authentication classes, so DRF turns every authentication failure into a
+`403`. Measured against wger 2.7, an expired, revoked or unknown token and a
+deactivated user all give `403 {"code": "token_not_valid"}` (simplejwt, last in
+the chain), a missing scope gives `403` naming it (`The access token is missing
+the "api:write" scope.`), and a token bound to another resource `403 Invalid
+target resource.` The status code alone therefore says nothing; the body does.
+
+A model that receives a bare rejection retries, and the retry fails
+identically: the token is the caller's own, and only a new authorization can
+produce a live one. So `api_err` attaches a hint saying the connection must be
+authorized again, and for a missing scope names it — a user who granted only
+`api:read` would otherwise watch every write tool fail opaquely. The allowlist
+lookup maps the same way: a named scope becomes `403 insufficient_scope`, any
+other rejection `401 invalid_token`, which is what makes a client refresh.
+
+### The HTTP transport is stateless
+
+In a stateful MCP session every tool call runs in the context of the request
+that opened the session, so the bound identity — and with it the forwarded
+token — would be the first request's for the session's whole life. After the
+hourly refresh the expired token kept going out, and since this mode does not
+check the token locally, any bearer plus a known session id acted as the
+session's owner. The server uses nothing a session provides (no server-initiated
+requests, no resumable streams; responses are plain JSON already), so it runs
+stateless: each request carries, and is served with, its own token. This
+applies to `oidc` too, which had the same flaw with the exchanged credential.
 
 ### `oidc` stays; the default does not change
 

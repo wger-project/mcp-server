@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import json
-import re
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol, TypeVar
@@ -18,6 +17,7 @@ from wger_api_client.errors import UnexpectedStatus
 from wger_api_client.types import UNSET, Unset
 
 from ..api_client import REQUEST_TIMEOUT_SECONDS, paginate
+from ..auth.wger_oidc import missing_scope, token_rejected
 
 T = TypeVar("T")
 
@@ -77,11 +77,6 @@ def bad_request(detail: str) -> dict[str, Any]:
     return {"error": True, "status": 400, "detail": detail}
 
 
-# wger names the scope it wanted in the 403 body ("The access token is missing
-# the "api:write" scope."), which is the one piece of that message worth lifting
-# out — a caller has to be told *which* grant is short, not just that one is.
-_MISSING_SCOPE = re.compile(r'["\'](api:[a-z]+)["\']')
-
 _REAUTH_HINT = (
     "wger rejected the credential this server sent. If this connection was "
     "authorized over OAuth, its access token has expired or been revoked and "
@@ -91,12 +86,12 @@ _REAUTH_HINT = (
 
 def _scope_hint(detail: Any) -> str | None:
     """The re-authorization hint for a 403, when it is a missing scope."""
-    match = _MISSING_SCOPE.search(str(detail))
-    if not match:
+    scope = missing_scope(detail)
+    if not scope:
         return None
     return (
         f"wger refused this call because the connection was authorized without "
-        f'the "{match.group(1)}" scope. It has to be authorized again with that '
+        f'the "{scope}" scope. It has to be authorized again with that '
         f"scope granted — retrying will fail the same way."
     )
 
@@ -104,11 +99,9 @@ def _scope_hint(detail: Any) -> str | None:
 def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
     """Shape an upstream failure as a tool-response dict.
 
-    A 401 or a missing scope carries a ``hint`` on top of the raw status: those
-    two are the only upstream failures a *retry* cannot fix, and the caller —
-    usually a model — has no other way to tell them apart from the transient
-    ones. wger's own 403 body says which scope is missing, so the hint can name
-    it rather than sending the user off to guess.
+    A rejected token or a missing scope carries a ``hint`` on top of the raw
+    status: those two are the only upstream failures a *retry* cannot fix, and
+    the caller — usually a model — cannot tell them from the transient ones.
     """
     if isinstance(exc, UnexpectedStatus):
         try:
@@ -116,7 +109,7 @@ def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
         except ValueError:
             detail = exc.content.decode(errors="replace")
         out: dict[str, Any] = {"error": True, "status": exc.status_code, "detail": detail}
-        if exc.status_code == 401:
+        if token_rejected(exc.status_code, detail):
             out["hint"] = _REAUTH_HINT
         elif exc.status_code == 403 and (hint := _scope_hint(detail)):
             out["hint"] = hint

@@ -137,6 +137,10 @@ def build_app(settings: Settings) -> Starlette:
     server = build_server(
         settings,
         json_response=True,
+        # A stateful session runs every tool call in the context of the request
+        # that opened it, so the caller identity (and its token) would be the
+        # first request's for the session's whole life.
+        stateless_http=True,
         streamable_http_path=settings.mcp_path,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=bool(settings.allowed_hosts),

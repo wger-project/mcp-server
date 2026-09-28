@@ -202,6 +202,8 @@ def build_authorization_server_facade(
         # the scope names are the deployment's, so nothing is added or claimed.
         required_scopes=settings.mcp_wger_scopes if native else None,
         advertised_scopes=settings.mcp_wger_scopes if native else None,
+        # The token is passed through to wger, so it must not be bound to us.
+        strip_resource=native,
     )
 
 

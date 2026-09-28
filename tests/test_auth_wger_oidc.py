@@ -11,11 +11,14 @@ the discovery documents advertise) come out right.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import httpx
 import pytest
 import respx
 from pydantic import ValidationError
+from wger_api_client.api.userprofile import userprofile_retrieve
+from wger_api_client.models.userprofile import Userprofile
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.auth.exchange import WgerTokenError, WgerTokenProvider
@@ -24,11 +27,15 @@ from wger_mcp.auth.wger_oidc import UsernameResolver, token_fingerprint
 from wger_mcp.config import AuthStrategy, Settings, Transport, load_settings
 
 from .conftest import (
+    PROFILE,
     WGER_AUTHORIZE,
     WGER_BASE,
+    WGER_INVALID_RESOURCE,
     WGER_OIDC_ENV,
+    WGER_TOKEN_NOT_VALID,
     WGER_USERPROFILE,
     make_client,
+    wger_missing_scope,
 )
 
 TOKEN = "wger-opaque-access-token"
@@ -157,8 +164,21 @@ def test_allowlist_rejects_everyone_else(mock_wger_oidc: respx.MockRouter) -> No
         assert r.json()["reason"] == "user not allowed"
 
 
-def test_a_token_wger_rejects_is_reported_as_such(mock_wger_oidc: respx.MockRouter) -> None:
-    mock_wger_oidc.get(WGER_USERPROFILE).respond(401, json={"detail": "Invalid token."})
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        # What wger sends for an expired, revoked or unknown token
+        (403, WGER_TOKEN_NOT_VALID),
+        # A token issued before the facade stopped forwarding `resource`
+        (403, WGER_INVALID_RESOURCE),
+        (401, {"detail": "Invalid token."}),
+    ],
+)
+def test_a_token_wger_rejects_is_reported_as_such(
+    mock_wger_oidc: respx.MockRouter, status: int, body: dict
+) -> None:
+    """A 401 with invalid_token is what makes the client refresh the token."""
+    mock_wger_oidc.get(WGER_USERPROFILE).respond(status, json=body)
     with _client(MCP_OIDC_ALLOWED_USERS="alice") as c:
         r = c.post("/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"})
         assert r.status_code == 401
@@ -168,7 +188,7 @@ def test_a_token_wger_rejects_is_reported_as_such(mock_wger_oidc: respx.MockRout
 def test_a_grant_without_api_read_is_a_403(mock_wger_oidc: respx.MockRouter) -> None:
     """403 rather than 401 on purpose: re-running the OAuth flow returns the same
     token, so the client has to be told the *grant* is short, not the token."""
-    mock_wger_oidc.get(WGER_USERPROFILE).respond(403, json={"detail": "missing scope"})
+    mock_wger_oidc.get(WGER_USERPROFILE).respond(403, json=wger_missing_scope("api:read"))
     with _client(MCP_OIDC_ALLOWED_USERS="alice") as c:
         r = c.post("/mcp/", json=_TOOLS_LIST, headers={"Authorization": f"Bearer {TOKEN}"})
         assert r.status_code == 403
@@ -295,6 +315,48 @@ async def test_the_outbound_call_carries_the_inbound_token() -> None:
         reset_identity(ctx)
         await api.get_async_httpx_client().aclose()
     assert route.calls.last.request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_each_request_carries_its_own_token(
+    mock_wger_oidc: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stateful MCP session ran every tool call in the context of the request
+    that opened it: after a token refresh the old token kept going out, and any
+    bearer plus the session id acted as the session's owner."""
+
+    async def retrieve(*, client: Any) -> Userprofile:
+        await client.get_async_httpx_client().get("/api/v2/userprofile/")
+        return Userprofile.from_dict(dict(PROFILE))
+
+    monkeypatch.setattr(userprofile_retrieve, "asyncio", retrieve)
+    route = mock_wger_oidc.get(WGER_USERPROFILE).respond(json=PROFILE)
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    whoami = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "whoami", "arguments": {}},
+    }
+    with _client() as c:
+        first = c.post(
+            "/mcp/", json=initialize, headers={"Authorization": "Bearer A", **_MCP_HEADERS}
+        )
+        assert first.status_code == 200
+        assert "mcp-session-id" not in first.headers
+        r = c.post(
+            "/mcp/", json=whoami, headers={"Authorization": "Bearer B", **_MCP_HEADERS}
+        )
+        assert r.status_code == 200
+    assert route.calls.last.request.headers["authorization"] == "Bearer B"
 
 
 @pytest.mark.asyncio
