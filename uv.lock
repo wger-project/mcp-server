@@ -1164,15 +1164,15 @@ wheels = [
 
 [[package]]
 name = "wger-api-client"
-version = "2.6.1"
+version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/d6/45be60e906a88abc322a6b2ff434b50744d7fcdd28c7e55898282025aeb6/wger_api_client-2.6.1.tar.gz", hash = "sha256:b5c55d024c224aeacb5f554ab5f5c629f589cc95ad248fe35e66e546df73be7d", size = 171607, upload-time = "2026-08-13T11:25:20.218Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/34/443ef1586f2bf467a1ffc4f34a1ddf3231cbeea048093be6295420880f2c/wger_api_client-2.7.0.tar.gz", hash = "sha256:a1407ee8a4068adafd73494d339cfdca0fbdd3a523b3d99d830ea5d95ffb017c", size = 181494, upload-time = "2026-09-28T16:55:22.956Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/61/a5b5167398393153ef7116c4ff72047ec037fb324ca6b21cb95aa1443f28/wger_api_client-2.6.1-py3-none-any.whl", hash = "sha256:c2fc4a6d5d45106c7946146e74bb73f6fe63d116973be7546d215dd47423e454", size = 616660, upload-time = "2026-08-13T11:25:18.469Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/5d/5a68fa0087681e6b9a71e7a89e36208b1f34c13515b94afc3e283672f3c2/wger_api_client-2.7.0-py3-none-any.whl", hash = "sha256:6e997196fb7b0870e525ba29150233d6f620470f257767ecfcd9fc47760760c0", size = 634105, upload-time = "2026-09-28T16:55:20.947Z" },
 ]
 
 [[package]]
@@ -1211,7 +1211,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "wger-api-client", specifier = ">=2.6.1,<3" },
+    { name = "wger-api-client", specifier = ">=2.7,<3" },
 ]
 
 [package.metadata.requires-dev]

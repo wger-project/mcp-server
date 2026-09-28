@@ -54,6 +54,18 @@ REPETITION_UNITS: dict[str, int] = {
 RIR_MAX = 4.5
 RIR_STEP = 0.5
 
+# What the value column of a measurement can physically hold (max_digits=8,
+# decimal_places=2). Body weight goes through the same column since wger 2.7
+# merged the weight table into measurements.
+#
+# Deliberately the *column* cap and not a plausible one: from 2.7 the range a
+# value may be in depends on the metric type of its category — 20-350 kg for a
+# body weight, 0-100000 for a step count, 0-1440 minutes for a sleep stage
+# (wger/measurements/limits.py). One number here fits none of them, and the
+# server's 400 names the actual range, which is a better answer than anything
+# this side could guess. So the bound only keeps out what no column can store.
+MEASUREMENT_VALUE_MAX = 999999.99
+
 
 class ToolInputError(Exception):
     """An argument wger cannot accept. Reported to the caller as a 400."""
@@ -284,18 +296,21 @@ def day_bounds(first: date | None, last: date | None) -> tuple[datetime | None, 
     return since, until
 
 
-def day_range_filters(first: date | None, last: date | None) -> dict[str, datetime]:
+def day_range_filters(
+    first: date | None, last: date | None, field: str = "date"
+) -> dict[str, datetime]:
     """:func:`day_bounds` as list-endpoint filters, an open end left out.
 
     Absent rather than ``UNSET``, so an unfiltered call sends no date query at
-    all.
+    all. ``field`` names the timestamp to filter on: wger spells it ``date`` on
+    logs and measurements, but a session is cut on ``datetime_start``.
     """
     since, until = day_bounds(first, last)
     filters: dict[str, datetime] = {}
     if since is not None:
-        filters["date_gte"] = since
+        filters[f"{field}_gte"] = since
     if until is not None:
-        filters["date_lt"] = until
+        filters[f"{field}_lt"] = until
     return filters
 
 
