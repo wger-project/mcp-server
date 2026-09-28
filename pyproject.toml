@@ -1,6 +1,6 @@
 [project]
 name = "wger-mcp"
-version = "0.2.0"
+version = "2.7.0"
 description = "MCP server exposing the wger fitness/nutrition REST API as tools, with pluggable auth"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,7 +46,7 @@ dependencies = [
     "joserfc>=1.0",
     "starlette>=0.37",
     "uvicorn[standard]>=0.30",
-    "wger-api-client>=2.7,<3",
+    "wger-api-client>=2.7,<2.8",
 ]
 
 [project.scripts]

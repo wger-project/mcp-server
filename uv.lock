@@ -1177,7 +1177,7 @@ wheels = [
 
 [[package]]
 name = "wger-mcp"
-version = "0.2.0"
+version = "2.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
@@ -1211,7 +1211,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "wger-api-client", specifier = ">=2.7,<3" },
+    { name = "wger-api-client", specifier = ">=2.7,<2.8" },
 ]
 
 [package.metadata.requires-dev]
