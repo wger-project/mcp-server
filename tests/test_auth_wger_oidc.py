@@ -78,10 +78,13 @@ def test_scopes_accept_a_comma_separated_string(monkeypatch: pytest.MonkeyPatch)
     assert load_settings(env_file=None).mcp_wger_scopes == ["openid", "api:read"]
 
 
-def test_empty_scopes_are_refused() -> None:
+@pytest.mark.parametrize("scopes", [[], ["openid", "api:write"]])
+def test_scopes_without_api_read_are_refused(scopes: list[str]) -> None:
+    """Every token is checked by reading the caller's profile, which needs
+    api:read; without it every request would fail with insufficient_scope."""
     with pytest.raises(ValidationError) as exc:
-        _settings(mcp_wger_scopes=[])
-    assert "MCP_WGER_SCOPES" in str(exc.value)
+        _settings(mcp_wger_scopes=scopes)
+    assert "api:read" in str(exc.value)
 
 
 def test_stdio_still_refuses_an_inbound_strategy() -> None:

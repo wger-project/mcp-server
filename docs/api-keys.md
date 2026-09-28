@@ -42,7 +42,8 @@ Relevant settings:
 
 - `MCP_WGER_SCOPES` — what to ask wger for; default `openid api:read api:write`.
   `api:read` gates every read and `api:write` every write, so dropping the
-  latter makes the deployment read-only.
+  latter makes the deployment read-only. `api:read` is required: every token
+  is checked by reading the caller's profile.
 - `MCP_OIDC_ALLOWED_USERS` — optional allowlist, checked against the username
   that lookup returns.
 

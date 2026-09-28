@@ -379,8 +379,13 @@ class Settings(BaseSettings):
             # wger issues the token, validates it and names the scopes, so this
             # server holds no client credentials and no audience of its own.
             # Listed explicitly so the absence is a decision, not an oversight.
-            if not self.mcp_wger_scopes:
-                raise ValueError("MCP_WGER_SCOPES must not be empty")
+            if "api:read" not in self.mcp_wger_scopes:
+                # Every request's token is checked with a read of the caller's
+                # profile, so without it nothing gets through.
+                raise ValueError(
+                    "MCP_WGER_SCOPES must include api:read: the server checks every "
+                    "token by reading the caller's wger profile"
+                )
         elif self.mcp_auth is AuthStrategy.oidc:
             missing = [
                 name
