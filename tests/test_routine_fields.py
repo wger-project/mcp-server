@@ -395,3 +395,107 @@ async def test_empty_requirements_clear_the_gate(monkeypatch: pytest.MonkeyPatch
         {"kind": "weight", "config_id": "3", "requirements": []},
     )
     assert patch.body.to_dict() == {"requirements": {"rules": []}}
+
+
+# ---------- double progression: max_* rules and all_sets ----------
+
+
+def _stored(monkeypatch: pytest.MonkeyPatch, requirements: dict[str, Any]) -> _Capture:
+    """The weight config wger holds before the update."""
+    read = _Capture(
+        api_models.WeightConfig(
+            id=3, slot_entry=2, iteration=2, value="2.5", requirements=requirements
+        )
+    )
+    monkeypatch.setattr(routines.weight_config_retrieve, "asyncio", read)
+    return read
+
+
+@pytest.mark.asyncio
+async def test_double_progression(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Add weight once every set reaches the top of the rep range."""
+    mcp = _register()
+    create = _Capture(WEIGHT_CFG)
+    monkeypatch.setattr(routines.weight_config_create, "asyncio", create)
+    await mcp.call_tool(
+        "set_slot_entry_config",
+        {
+            "slot_entry_id": "2",
+            "kind": "weight",
+            "value": 2.5,
+            "iteration": 2,
+            "operation": "+",
+            "repeat": True,
+            "requirements": ["max_repetitions"],
+            "all_sets": True,
+        },
+    )
+    assert create.body.requirements == {"rules": ["max_repetitions"], "all_sets": True}
+
+
+@pytest.mark.asyncio
+async def test_all_sets_needs_a_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refused before the weight unit is patched, so nothing is written."""
+    mcp = _register()
+    create = _Capture(WEIGHT_CFG)
+    monkeypatch.setattr(routines.weight_config_create, "asyncio", create)
+    entry = _Capture(ENTRY)
+    monkeypatch.setattr(routines.slot_entry_partial_update, "asyncio", entry)
+    out = _result(
+        await mcp.call_tool(
+            "set_slot_entry_config",
+            {
+                "slot_entry_id": "2",
+                "kind": "weight",
+                "value": 2.5,
+                "weight_unit": "kg",
+                "all_sets": True,
+            },
+        )
+    )
+    assert not create.calls
+    assert not entry.calls
+    assert "rule" in json.dumps(out)
+
+
+@pytest.mark.asyncio
+async def test_new_rules_keep_the_stored_all_sets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """wger replaces the blob as a whole, the flag must not get lost on the way."""
+    mcp = _register()
+    _stored(monkeypatch, {"rules": ["repetitions"], "all_sets": True})
+    patch = _Capture(WEIGHT_CFG)
+    monkeypatch.setattr(routines.weight_config_partial_update, "asyncio", patch)
+    await mcp.call_tool(
+        "update_slot_entry_config",
+        {"kind": "weight", "config_id": "3", "requirements": ["max_repetitions"]},
+    )
+    assert patch.body.to_dict() == {
+        "requirements": {"rules": ["max_repetitions"], "all_sets": True}
+    }
+
+
+@pytest.mark.asyncio
+async def test_all_sets_keeps_the_stored_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register()
+    read = _stored(monkeypatch, {"rules": ["max_repetitions"]})
+    patch = _Capture(WEIGHT_CFG)
+    monkeypatch.setattr(routines.weight_config_partial_update, "asyncio", patch)
+    await mcp.call_tool(
+        "update_slot_entry_config", {"kind": "weight", "config_id": "3", "all_sets": True}
+    )
+    assert read.calls[-1]["id"] == 3
+    assert patch.body.to_dict() == {
+        "requirements": {"rules": ["max_repetitions"], "all_sets": True}
+    }
+
+
+@pytest.mark.asyncio
+async def test_all_sets_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp = _register()
+    _stored(monkeypatch, {"rules": ["max_repetitions"], "all_sets": True})
+    patch = _Capture(WEIGHT_CFG)
+    monkeypatch.setattr(routines.weight_config_partial_update, "asyncio", patch)
+    await mcp.call_tool(
+        "update_slot_entry_config", {"kind": "weight", "config_id": "3", "all_sets": False}
+    )
+    assert patch.body.to_dict() == {"requirements": {"rules": ["max_repetitions"]}}

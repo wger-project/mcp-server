@@ -25,48 +25,56 @@ from wger_api_client.api.max_repetitions_config import (
     max_repetitions_config_destroy,
     max_repetitions_config_list,
     max_repetitions_config_partial_update,
+    max_repetitions_config_retrieve,
 )
 from wger_api_client.api.max_rest_config import (
     max_rest_config_create,
     max_rest_config_destroy,
     max_rest_config_list,
     max_rest_config_partial_update,
+    max_rest_config_retrieve,
 )
 from wger_api_client.api.max_rir_config import (
     max_rir_config_create,
     max_rir_config_destroy,
     max_rir_config_list,
     max_rir_config_partial_update,
+    max_rir_config_retrieve,
 )
 from wger_api_client.api.max_sets_config import (
     max_sets_config_create,
     max_sets_config_destroy,
     max_sets_config_list,
     max_sets_config_partial_update,
+    max_sets_config_retrieve,
 )
 from wger_api_client.api.max_weight_config import (
     max_weight_config_create,
     max_weight_config_destroy,
     max_weight_config_list,
     max_weight_config_partial_update,
+    max_weight_config_retrieve,
 )
 from wger_api_client.api.repetitions_config import (
     repetitions_config_create,
     repetitions_config_destroy,
     repetitions_config_list,
     repetitions_config_partial_update,
+    repetitions_config_retrieve,
 )
 from wger_api_client.api.rest_config import (
     rest_config_create,
     rest_config_destroy,
     rest_config_list,
     rest_config_partial_update,
+    rest_config_retrieve,
 )
 from wger_api_client.api.rir_config import (
     rir_config_create,
     rir_config_destroy,
     rir_config_list,
     rir_config_partial_update,
+    rir_config_retrieve,
 )
 from wger_api_client.api.routine import (
     routine_create,
@@ -81,6 +89,7 @@ from wger_api_client.api.sets_config import (
     sets_config_destroy,
     sets_config_list,
     sets_config_partial_update,
+    sets_config_retrieve,
 )
 from wger_api_client.api.slot import (
     slot_create,
@@ -100,6 +109,7 @@ from wger_api_client.api.weight_config import (
     weight_config_destroy,
     weight_config_list,
     weight_config_partial_update,
+    weight_config_retrieve,
 )
 from wger_api_client.client import AuthenticatedClient
 from wger_api_client.errors import UnexpectedStatus
@@ -135,6 +145,7 @@ from .common import (
 
 class _ConfigApi(NamedTuple):
     list_mod: Any
+    retrieve_mod: Any
     create_mod: Any
     update_mod: Any
     destroy_mod: Any
@@ -148,6 +159,7 @@ class _ConfigApi(NamedTuple):
 CONFIG_KINDS: dict[str, _ConfigApi] = {
     "sets": _ConfigApi(
         sets_config_list,
+        sets_config_retrieve,
         sets_config_create,
         sets_config_partial_update,
         sets_config_destroy,
@@ -157,6 +169,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "reps": _ConfigApi(
         repetitions_config_list,
+        repetitions_config_retrieve,
         repetitions_config_create,
         repetitions_config_partial_update,
         repetitions_config_destroy,
@@ -166,6 +179,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "weight": _ConfigApi(
         weight_config_list,
+        weight_config_retrieve,
         weight_config_create,
         weight_config_partial_update,
         weight_config_destroy,
@@ -175,6 +189,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "rir": _ConfigApi(
         rir_config_list,
+        rir_config_retrieve,
         rir_config_create,
         rir_config_partial_update,
         rir_config_destroy,
@@ -184,6 +199,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "rest": _ConfigApi(
         rest_config_list,
+        rest_config_retrieve,
         rest_config_create,
         rest_config_partial_update,
         rest_config_destroy,
@@ -193,6 +209,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "max_sets": _ConfigApi(
         max_sets_config_list,
+        max_sets_config_retrieve,
         max_sets_config_create,
         max_sets_config_partial_update,
         max_sets_config_destroy,
@@ -202,6 +219,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "max_reps": _ConfigApi(
         max_repetitions_config_list,
+        max_repetitions_config_retrieve,
         max_repetitions_config_create,
         max_repetitions_config_partial_update,
         max_repetitions_config_destroy,
@@ -211,6 +229,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "max_weight": _ConfigApi(
         max_weight_config_list,
+        max_weight_config_retrieve,
         max_weight_config_create,
         max_weight_config_partial_update,
         max_weight_config_destroy,
@@ -220,6 +239,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "max_rir": _ConfigApi(
         max_rir_config_list,
+        max_rir_config_retrieve,
         max_rir_config_create,
         max_rir_config_partial_update,
         max_rir_config_destroy,
@@ -229,6 +249,7 @@ CONFIG_KINDS: dict[str, _ConfigApi] = {
     ),
     "max_rest": _ConfigApi(
         max_rest_config_list,
+        max_rest_config_retrieve,
         max_rest_config_create,
         max_rest_config_partial_update,
         max_rest_config_destroy,
@@ -244,9 +265,16 @@ OPERATIONS = tuple(sorted(OPERATION_ENUM_VALUES))
 STEPS = tuple(sorted(STEP_ENUM_VALUES))
 
 # Log fields a progression may be made conditional on. wger keeps the list in
-# manager/consts.py as REQUIREMENTS_RULES_KEYS and validates against it; the
+# manager/consts.py as REQUIREMENT_RULES and validates against it; the
 # generated client types the field as a bare JSON blob, so the check is here.
-REQUIREMENT_RULES = ("repetitions", "rest", "rir", "weight")
+REQUIREMENT_RULES = (
+    "max_repetitions",
+    "max_weight",
+    "repetitions",
+    "rest",
+    "rir",
+    "weight",
+)
 
 # wger requires an end date on every routine; twelve weeks is a conventional
 # training block.
@@ -273,13 +301,17 @@ def _unknown_kind(kind: str) -> dict[str, Any]:
     return bad_request(f"unknown kind '{kind}'; expected one of {sorted(CONFIG_KINDS)}")
 
 
-def _requirements(rules: list[str] | None) -> dict[str, list[str]] | None:
+def _requirements(rules: list[str] | None, all_sets: bool = False) -> dict[str, Any] | None:
     """wger's requirements blob for the given rule names.
 
     An empty list is not the same as ``None``: it sends ``{"rules": []}``,
     which clears the gate on a config that already had one, while ``None``
     leaves the field out of the request entirely.
+
+    ``all_sets`` is only sent when set; off is wger's default.
     """
+    if all_sets and not rules:
+        raise ToolInputError("all_sets needs at least one requirement rule to apply to")
     if rules is None:
         return None
     unknown = sorted(set(rules) - set(REQUIREMENT_RULES))
@@ -288,7 +320,10 @@ def _requirements(rules: list[str] | None) -> dict[str, list[str]] | None:
             f"unknown requirement rule(s) {', '.join(unknown)}; "
             f"expected any of {', '.join(REQUIREMENT_RULES)}"
         )
-    return {"rules": list(dict.fromkeys(rules))}
+    blob: dict[str, Any] = {"rules": list(dict.fromkeys(rules))}
+    if all_sets:
+        blob["all_sets"] = True
+    return blob
 
 
 def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
@@ -781,14 +816,16 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         step: str | None = None,
         repeat: bool | None = None,
         requirements: list[str] | None = None,
+        all_sets: bool | None = None,
     ) -> dict[str, Any]:
         """Patch an existing per-iteration config record.
         kind selects the endpoint (sets, reps, weight, rir, rest, max_*).
         Use this to bump weight when progressing.
 
-        requirements gates the progression on the logs (see
+        requirements and all_sets gate the progression on the logs (see
         set_slot_entry_config). Pass an empty list to drop an existing gate and
-        let the step apply unconditionally again.
+        let the step apply unconditionally again. Either one can be changed on
+        its own, the other keeps its stored value.
         """
         cfg = CONFIG_KINDS.get(kind)
         if cfg is None:
@@ -797,18 +834,27 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             return bad_request(f"operation must be one of {OPERATIONS}")
         if step is not None and step not in STEP_ENUM_VALUES:
             return bad_request(f"step must be one of {STEPS}")
+        config = as_int(config_id, "config_id")
+        # wger replaces the requirements as a whole, so the half not given is
+        # read back; clearing the rules needs no read, all_sets goes with them
+        if (requirements is None and all_sets is not None) or (all_sets is None and requirements):
+            current = await cfg.retrieve_mod.asyncio(id=config, client=api)
+            stored = current.requirements if current is not None else None
+            stored = stored if isinstance(stored, dict) else {}
+            if requirements is None:
+                requirements = stored.get("rules") or []
+            if all_sets is None:
+                all_sets = bool(stored.get("all_sets"))
         body = cfg.patched(
             value=_config_value(cfg, kind, value) if value is not None else UNSET,
             iteration=opt(iteration),
             operation=opt(operation),
             step=opt(step),
             repeat=opt(repeat),
-            requirements=opt(_requirements(requirements)),
+            requirements=opt(_requirements(requirements, bool(all_sets))),
         )
         require_fields(body)
-        updated = await cfg.update_mod.asyncio(
-            id=as_int(config_id, "config_id"), client=api, body=body
-        )
+        updated = await cfg.update_mod.asyncio(id=config, client=api, body=body)
         return updated.to_dict()
 
     @mcp.tool()
@@ -926,6 +972,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         repeat: bool = False,
         weight_unit: str | None = None,
         requirements: list[str] | None = None,
+        all_sets: bool = False,
     ) -> dict[str, Any]:
         """Create a per-iteration config record for a slot entry.
         kind: one of sets, reps, weight, rir, rest, max_sets, max_reps,
@@ -938,11 +985,22 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         here is silently read in whatever unit the entry already had.
 
         requirements makes the step conditional on what was actually logged, as
-        a list of any of: repetitions, weight, rir, rest. requirements=['reps']
-        is not a rule name — use 'repetitions'. With ['repetitions'] the weight
-        only goes up once the prescribed reps were hit; left empty the
-        progression fires every iteration whether or not the trainee earned it,
-        which is how a plan drifts ahead of the person following it.
+        a list of any of: repetitions, weight, rir, rest, max_repetitions,
+        max_weight. requirements=['reps'] is not a rule name — use
+        'repetitions', and 'max_repetitions' rather than 'max_reps'. With
+        ['repetitions'] the weight only goes up once the prescribed reps were
+        hit; left empty the progression fires every iteration whether or not
+        the trainee earned it, which is how a plan drifts ahead of the person
+        following it.
+
+        For a rep range (a reps and a max_reps config, e.g. 8-12) 'repetitions'
+        is already met at the bottom, 8. 'max_repetitions' waits for the top,
+        12; without a range it behaves like 'repetitions'. all_sets=True asks
+        for every logged set to meet the rules and at least the prescribed
+        number of sets to be logged, instead of a single qualifying set. Double
+        progression (add weight once all sets reach the top of the range) is a
+        weight config with operation '+', repeat=True,
+        requirements=['max_repetitions'] and all_sets=True.
         """
         cfg = CONFIG_KINDS.get(kind)
         if cfg is None:
@@ -952,6 +1010,8 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
         if step not in STEP_ENUM_VALUES:
             return bad_request(f"step must be one of {STEPS}")
         entry = as_int(slot_entry_id, "slot_entry_id")
+        # Before the weight unit is patched, so a refused gate changes nothing
+        gate = _requirements(requirements, all_sets)
         if weight_unit is not None:
             if kind not in ("weight", "max_weight"):
                 return bad_request(
@@ -974,7 +1034,7 @@ def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -
             operation=operation,
             step=step,
             repeat=repeat,
-            requirements=opt(_requirements(requirements)),
+            requirements=opt(gate),
         )
         created = await cfg.create_mod.asyncio(client=api, body=body)
         return created.to_dict()

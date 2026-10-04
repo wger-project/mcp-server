@@ -5,6 +5,9 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+**Requires wger 2.8.0-dev.1 or newer**, the first development build with
+double progression.
+
 * The wger version the startup check expects is written down again, as
   `MIN_WGER_VERSION` in `compat.py`, rather than read off the installed
   `wger-api-client`. The client can only name a release, while wger counts its
@@ -15,6 +18,11 @@ notes. This file records important changes to *this package*.
   2.7.0 counted a pre-release as its release, which let a build reporting
   `2.8.0-dev.0` pass for 2.8 without having its API. A test keeps the floor
   from falling behind the client.
+* `set_slot_entry_config` and `update_slot_entry_config` know wger 2.8's
+  double progression: the requirement rules `max_repetitions` and `max_weight`
+  gate on the top of a range, and `all_sets` requires every logged set to
+  qualify. Changing only the rules or only `all_sets` keeps the other one,
+  where the tool used to send the rules alone and drop the flag.
 
 ## 2.7.0
 

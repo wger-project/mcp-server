@@ -38,7 +38,7 @@ log = logging.getLogger("wger_mcp")
 #: The spelling decides the meaning, as for the flutter app's MIN_SERVER_VERSION:
 #: "2.8.0-dev.3" admits that build and everything after it, "2.8" only the
 #: finished release, which until then also shuts out wger.de, as it runs master.
-MIN_WGER_VERSION = "2.7"
+MIN_WGER_VERSION = "2.8.0-dev.1"
 
 #: Short: this runs before the server is useful, and a wger that needs longer
 #: than this to answer a constant is not one worth waiting on.
