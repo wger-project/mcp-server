@@ -9,14 +9,14 @@ a date filter silently.
 
 from __future__ import annotations
 
+from importlib.metadata import version as installed_version
+
 import httpx
 import pytest
+from packaging.version import Version
 from starlette.testclient import TestClient
 
-from wger_mcp.compat import (
-    check_wger_version,
-    required_version,
-)
+from wger_mcp.compat import MIN_WGER_VERSION, check_wger_version
 from wger_mcp.config import Settings
 
 
@@ -41,10 +41,10 @@ def _answering(monkeypatch: pytest.MonkeyPatch, handler) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _floor_at_2_7(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the derived floor, so these tests describe the comparison rather than
-    whichever client happens to be installed."""
-    monkeypatch.setattr("wger_mcp.compat.required_version", lambda: (2, 7))
+def _floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the floor, so these tests describe the comparison rather than
+    whatever the tools need today."""
+    monkeypatch.setattr("wger_mcp.compat.MIN_WGER_VERSION", "2.8.0-dev.3")
 
 
 def _returning(version, status: int = 200):
@@ -55,26 +55,26 @@ def _returning(version, status: int = 200):
     return handler
 
 
-@pytest.mark.asyncio
-async def test_a_supported_version_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    _answering(monkeypatch, _returning("2.7.0"))
-    assert await check_wger_version(_settings()) == "2.7.0"
+async def _warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, reported: str
+) -> bool:
+    """Whether a wger reporting `reported` is warned about. It starts either way."""
+    _answering(monkeypatch, _returning(reported))
+    with caplog.at_level("WARNING", logger="wger_mcp"):
+        assert await check_wger_version(_settings()) == reported
+    return any(record.name == "wger_mcp" for record in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_a_newer_version_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    _answering(monkeypatch, _returning("2.9.1"))
-    assert await check_wger_version(_settings()) == "2.9.1"
-
-
-@pytest.mark.asyncio
-async def test_a_prerelease_of_a_supported_version_passes(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "reported",
+    ["2.8.0-dev.3", "2.8.0-dev.10", "2.8.0-rc.1", "2.8.0", "2.9.0-dev.0", "2.9.1"],
+)
+async def test_the_floor_and_what_follows_it_pass(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, reported: str
 ) -> None:
-    """PEP 440 orders 2.7.0a2 below 2.7, but it has the 2.7 API — and the people
-    running a release candidate are the worst possible audience to lock out."""
-    _answering(monkeypatch, _returning("2.7.0a2"))
-    assert await check_wger_version(_settings()) == "2.7.0a2"
+    """dev.10 follows dev.3: the build number is counted, not compared as text."""
+    assert not await _warns(monkeypatch, caplog, reported)
 
 
 @pytest.mark.asyncio
@@ -84,12 +84,27 @@ async def test_an_older_version_warns_but_starts(
     """Most of the surface does not care which release it talks to — the
     catalogs have been stable for years — so refusing to start would take away
     the tools that work along with the ones that do not."""
-    _answering(monkeypatch, _returning("2.6.1"))
-    with caplog.at_level("WARNING", logger="wger_mcp"):
-        assert await check_wger_version(_settings()) == "2.6.1"
-    message = caplog.text
-    assert "2.6.1" in message  # what it found
-    assert "2.7" in message  # what it expects
+    assert await _warns(monkeypatch, caplog, "2.7.0")
+    assert "2.7.0" in caplog.text  # what it found
+    assert "2.8.0-dev.3" in caplog.text  # what it expects
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_build_of_the_cycle_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A self-hosted master from before the change the floor names."""
+    assert await _warns(monkeypatch, caplog, "2.8.0-dev.2")
+
+
+@pytest.mark.asyncio
+async def test_a_release_floor_warns_about_its_development_builds(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The spelling decides: "2.8" is the finished release, which a master
+    reporting 2.8.0-dev.N has not reached yet, wger.de among them."""
+    monkeypatch.setattr("wger_mcp.compat.MIN_WGER_VERSION", "2.8")
+    assert await _warns(monkeypatch, caplog, "2.8.0-dev.5")
 
 
 @pytest.mark.asyncio
@@ -161,38 +176,16 @@ async def test_the_http_boot_runs_the_check(monkeypatch: pytest.MonkeyPatch) -> 
     assert seen, "the lifespan did not run the version check"
 
 
-# ---------- where the floor comes from ----------
+# ---------- the floor itself ----------
 
 
-def test_the_floor_is_the_release_the_client_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Read off wger-api-client rather than written down, so the two cannot
-    drift. Its README states the rule: 2.6.x targets a 2.6 server, the patch
-    component belongs to the package itself.
+def test_the_floor_keeps_up_with_the_client() -> None:
+    """The client targets one wger release (by its README, 2.7.x is meant for a
+    2.7 server), so a floor from an older one would let through a wger the
+    client cannot talk to. Raising the client without the floor fails here.
 
-    The autouse fixture pins the module attribute, which is what
-    check_wger_version looks up; the name imported here is still the real
-    function, so this exercises the derivation itself.
+    MIN_WGER_VERSION is the name imported above, which the autouse fixture does
+    not reach.
     """
-    monkeypatch.setattr("wger_mcp.compat.installed_version", lambda name: "2.7.3")
-    assert required_version() == (2, 7)
-
-
-def test_an_uninstallable_client_version_skips_the_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from importlib.metadata import PackageNotFoundError
-
-    def _missing(name: str) -> str:
-        raise PackageNotFoundError(name)
-
-    monkeypatch.setattr("wger_mcp.compat.installed_version", _missing)
-    assert required_version() is None
-
-
-@pytest.mark.asyncio
-async def test_without_a_known_floor_nothing_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("wger_mcp.compat.required_version", lambda: None)
-    _answering(monkeypatch, _returning("2.0.0"))
-    assert await check_wger_version(_settings()) is None
+    client = Version(installed_version("wger-api-client")).release[:2]
+    assert Version(MIN_WGER_VERSION).release[:2] >= client

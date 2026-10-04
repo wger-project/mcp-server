@@ -5,6 +5,17 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* The wger version the startup check expects is written down again, as
+  `MIN_WGER_VERSION` in `compat.py`, rather than read off the installed
+  `wger-api-client`. The client can only name a release, while wger counts its
+  development builds up with every API change, so the floor can now name a
+  point inside a cycle. Pre-releases sort below their release, as in the
+  flutter app, so the spelling decides: a floor of `2.8.0-dev.3` admits that
+  build and everything after it, a floor of `2.8` only the finished release.
+  2.7.0 counted a pre-release as its release, which let a build reporting
+  `2.8.0-dev.0` pass for 2.8 without having its API. A test keeps the floor
+  from falling behind the client.
+
 ## 2.7.0
 
 **Requires wger 2.7.** The 2.7 API renamed and retyped fields this server
