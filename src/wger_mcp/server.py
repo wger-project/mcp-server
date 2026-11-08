@@ -1,13 +1,13 @@
-"""FastMCP server: wger tools over stdio or streamable HTTP.
+"""MCP server: wger tools over stdio or streamable HTTP.
 
 Tool implementations live in ``wger_mcp.tools``; this module only wires the
-FastMCP instance, the upstream HTTP client, and whichever transport is running.
+MCPServer instance, the upstream HTTP client, and whichever transport is running.
 
 :func:`build_server` does the transport-neutral half — it is all either
-transport needs, and each caller hands it the FastMCP options its own transport
-has. :func:`build_app` wraps the result in Starlette for HTTP, adding the
-inbound auth middleware and the OAuth endpoints; :func:`serve_stdio` just pumps
-the same FastMCP instance over stdin/stdout.
+transport needs. :func:`build_app` wraps the result in Starlette for HTTP,
+passing the HTTP transport options and adding the inbound auth middleware and
+the OAuth endpoints; :func:`serve_stdio` just pumps the same MCPServer instance
+over stdin/stdout.
 """
 
 from __future__ import annotations
@@ -17,12 +17,11 @@ import contextlib
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Any
 
 import anyio
 import httpx
 import uvicorn
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -64,9 +63,9 @@ log = logging.getLogger("wger_mcp")
 
 @dataclass(frozen=True)
 class Server:
-    """A configured FastMCP instance plus the clients whose lifetime it shares."""
+    """A configured MCPServer instance plus the clients whose lifetime it shares."""
 
-    mcp: FastMCP
+    mcp: MCPServer
     api: AuthenticatedClient
     off_http: httpx.AsyncClient
     provider: WgerTokenProvider
@@ -77,17 +76,14 @@ class Server:
         await self.provider.aclose()
 
 
-def build_server(
-    settings: Settings, *, endpoints: OidcEndpoints | None = None, **fastmcp_kwargs: Any
-) -> Server:
-    """Wire up FastMCP and the upstream clients — identical for both transports.
+def build_server(settings: Settings, *, endpoints: OidcEndpoints | None = None) -> Server:
+    """Wire up MCPServer and the upstream clients — identical for both transports.
 
-    Options that only one transport has are the caller's to pass, because only
-    the caller knows which one it is; the tool modules see nothing but the API
-    client, so nothing here needs to ask whether it will be driven over a pipe
-    or over HTTP.
+    Transport options are not set here: the SDK takes them where the transport
+    is started (``streamable_http_app()``), so only :func:`build_app` has any.
     """
-    mcp = FastMCP("wger", **fastmcp_kwargs)
+    # Without version= the SDK reports an empty serverInfo.version.
+    mcp = MCPServer("wger", version=__version__)
 
     provider = build_token_provider(settings, endpoints)
     api = build_api_client(settings, provider)
@@ -139,20 +135,7 @@ def build_app(settings: Settings) -> Starlette:
     """
     _require_transport(settings, Transport.http, "build_app()")
     endpoints = resolve_endpoints(settings)
-    server = build_server(
-        settings,
-        endpoints=endpoints,
-        json_response=True,
-        # A stateful session runs every tool call in the context of the request
-        # that opened it, so the caller identity (and its token) would be the
-        # first request's for the session's whole life.
-        stateless_http=True,
-        streamable_http_path=settings.mcp_path,
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=bool(settings.allowed_hosts),
-            allowed_hosts=settings.allowed_hosts,
-        ),
-    )
+    server = build_server(settings, endpoints=endpoints)
     mcp = server.mcp
 
     # AS facade: lets a client that treats this origin as the OAuth authorization
@@ -197,7 +180,20 @@ def build_app(settings: Settings) -> Starlette:
     # how MCP_PATH is written. MCP clients (and curl) do not follow the 307
     # redirect_slashes would otherwise emit on POST, so a twin is required rather
     # than a redirect.
-    mcp_starlette = mcp.streamable_http_app()
+    mcp_starlette = mcp.streamable_http_app(
+        streamable_http_path=settings.mcp_path,
+        json_response=True,
+        # A stateful session runs every tool call in the context of the request
+        # that opened it, so the caller identity (and its token) would be the
+        # first request's for the session's whole life.
+        stateless_http=True,
+        # Always explicit: left as None, the SDK turns on its own localhost-only
+        # allow-list, which rejects every real hostname with 421.
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=bool(settings.allowed_hosts),
+            allowed_hosts=settings.allowed_hosts,
+        ),
+    )
     mcp_routes: list[Route] = []
     seen_paths: set[str] = set()
     for route in mcp_starlette.routes:

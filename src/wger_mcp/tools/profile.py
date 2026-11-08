@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client.api.userprofile import userprofile_retrieve
 from wger_api_client.client import AuthenticatedClient
 
@@ -12,7 +12,7 @@ from ..config import Settings
 from .common import api_tool
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_tool
     async def whoami() -> dict[str, Any]:

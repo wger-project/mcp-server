@@ -5,6 +5,13 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* Built on version 2 of the MCP Python SDK (`mcp>=2.3`). Clients speaking
+  protocol 2026-07-28 are now served natively, without a handshake; older
+  clients keep working as before. The server now reports its own version in
+  `serverInfo` instead of the SDK's. The SDK raises the floors of `anyio`
+  (4.9) and `pydantic` (2.12) and pulls in `httpx2` and `opentelemetry-api`;
+  tracing stays inert unless an OpenTelemetry SDK is configured.
+
 ## 2.7.0
 
 **Requires wger 2.7.** The 2.7 API renamed and retyped fields this server

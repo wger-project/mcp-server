@@ -11,7 +11,7 @@ from datetime import date, datetime
 from typing import Annotated, Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
 from wger_api_client.api.ingredient import ingredient_retrieve
@@ -76,7 +76,7 @@ def _goal(value: float | None) -> int | Unset:
     return UNSET if value is None else int(value)
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_list_tool
     async def list_nutrition_plans(

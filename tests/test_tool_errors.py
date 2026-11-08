@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.errors import UnexpectedStatus
 
@@ -36,15 +36,15 @@ def _settings() -> Settings:
     )
 
 
-def _register(module: Any) -> FastMCP:
-    mcp = FastMCP("test")
+def _register(module: Any) -> MCPServer:
+    mcp = MCPServer("test")
     settings = _settings()
     module.register(mcp, build_api_client(settings, _StubProvider()), settings)
     return mcp
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 def _raiser(exc: Exception):

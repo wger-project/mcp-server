@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings
@@ -22,8 +22,8 @@ class _StubProvider:
         pass
 
 
-def _register() -> FastMCP:
-    mcp = FastMCP("test")
+def _register() -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -65,7 +65,7 @@ def _listing(entries: list[Any]):
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 @pytest.mark.asyncio

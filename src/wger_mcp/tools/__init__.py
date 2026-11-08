@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client.client import AuthenticatedClient
 
 from ..config import Settings
@@ -32,7 +32,7 @@ from . import (
 
 # The client argument is Any because off takes the Open Food Facts httpx
 # client where the others take the wger one.
-Registrar = Callable[[FastMCP, Any, Settings], None]
+Registrar = Callable[[MCPServer, Any, Settings], None]
 
 # Keyed by group name, which is the module name. Iteration order is the
 # registration order, so it stays stable no matter how MCP_TOOLS is written.
@@ -74,9 +74,9 @@ def expand(names: Iterable[str]) -> set[str]:
 
 
 def register_all(
-    mcp: FastMCP, api: AuthenticatedClient, off_http: httpx.AsyncClient, settings: Settings
+    mcp: MCPServer, api: AuthenticatedClient, off_http: httpx.AsyncClient, settings: Settings
 ) -> None:
-    """Register tool modules on the given FastMCP instance.
+    """Register tool modules on the given MCPServer instance.
 
     Registers every group unless ``settings.mcp_tools`` names a subset. An
     unknown group name is an error rather than a silent omission: a typo would

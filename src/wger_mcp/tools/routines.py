@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from typing import Annotated, Any, NamedTuple
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
 from wger_api_client.api.day import (
@@ -291,7 +291,7 @@ def _requirements(rules: list[str] | None) -> dict[str, list[str]] | None:
     return {"rules": list(dict.fromkeys(rules))}
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     """The whole tree, reading and authoring.
 
     Kept so that ``MCP_TOOLS=routines`` means what it always did. The halves
@@ -304,7 +304,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
     register_write(mcp, api, settings)
 
 
-def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register_read(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     """Reading the plan: the routine tree, and what it prescribes today."""
     _language_id_for = language_id_resolver(api)
     # Exercise names live on translations, not on the exercise itself, and the
@@ -552,7 +552,7 @@ def register_read(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) ->
         return out
 
 
-def register_write(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     """Authoring the plan: creating, changing and deleting its parts."""
 
     @mcp.tool()

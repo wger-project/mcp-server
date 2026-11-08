@@ -498,6 +498,50 @@ def test_each_request_carries_its_own_token(
     assert route.calls.last.request.headers["authorization"] == "Bearer B"
 
 
+def test_a_2026_request_carries_its_own_token(
+    mock_wger_oidc: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At 2026-07-28 the SDK serves requests on a separate code path with no
+    handshake; the caller identity bound by the middleware has to reach the
+    tool there as well."""
+
+    async def retrieve(*, client: Any) -> Userprofile:
+        await client.get_async_httpx_client().get("/api/v2/userprofile/")
+        return Userprofile.from_dict(dict(PROFILE))
+
+    monkeypatch.setattr(userprofile_retrieve, "asyncio", retrieve)
+    route = mock_wger_oidc.get(WGER_USERPROFILE).respond(json=PROFILE)
+    whoami = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "whoami",
+            "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    headers = {
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "tools/call",
+        "Mcp-Name": "whoami",
+        **_MCP_HEADERS,
+    }
+    seen = []
+    with _client() as c:
+        for token in ("A", "B"):
+            auth = {"Authorization": f"Bearer {token}"}
+            r = c.post("/mcp/", json=whoami, headers={**auth, **headers})
+            assert r.status_code == 200, r.text
+            assert "error" not in r.json(), r.json()
+            seen.append(route.calls.last.request.headers["authorization"])
+    assert seen == ["Bearer A", "Bearer B"]
+
+
 @pytest.mark.asyncio
 async def test_pass_through_without_an_identity_is_an_error() -> None:
     """Belt and braces: the middleware always binds one, and a bug that skipped

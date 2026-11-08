@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.types import UNSET
 
@@ -70,8 +70,8 @@ class _Capture:
         return self.calls[-1]["body"]
 
 
-def _register() -> FastMCP:
-    mcp = FastMCP("test")
+def _register() -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -82,7 +82,7 @@ def _register() -> FastMCP:
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 def _entry(amount: str, weight_unit: int | None = None) -> api_models.LogItem:

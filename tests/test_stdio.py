@@ -86,7 +86,7 @@ async def _session(params: StdioServerParameters) -> AsyncIterator[ClientSession
 async def test_initializes_and_lists_tools() -> None:
     async with _session(_params()) as session:
         result = await session.initialize()
-        assert result.serverInfo.name == "wger"
+        assert result.server_info.name == "wger"
         tools = await session.list_tools()
 
     names = {t.name for t in tools.tools}
@@ -116,7 +116,7 @@ async def test_a_stray_env_file_in_the_cwd_is_ignored(tmp_path: Path) -> None:
     async with _session(_params(cwd=tmp_path)) as session:
         result = await session.initialize()
 
-    assert result.serverInfo.name == "wger"
+    assert result.server_info.name == "wger"
 
 
 async def test_a_lowercase_env_var_selects_stdio_and_still_ignores_the_file(
@@ -138,7 +138,7 @@ async def test_a_lowercase_env_var_selects_stdio_and_still_ignores_the_file(
     async with _session(params) as session:
         result = await session.initialize()
 
-    assert result.serverInfo.name == "wger"
+    assert result.server_info.name == "wger"
 
 
 def test_an_env_file_may_not_select_stdio(tmp_path: Path) -> None:
@@ -421,8 +421,8 @@ def test_sigint_shuts_down_quietly() -> None:
     assert "shutting down" in err
 
 
-def test_the_http_caller_passes_its_own_fastmcp_options() -> None:
-    """All three are the caller's to hand over now, so pin them where they show.
+def test_the_http_app_passes_its_transport_options() -> None:
+    """All three are build_app's to pass to the SDK, so pin them where they show.
 
     Dropping one is invisible in a unit assertion but obvious here: the mount
     path 404s, a configured host 421s, and the body arrives as SSE.

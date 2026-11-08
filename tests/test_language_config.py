@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 
 from wger_mcp.api_client import build_api_client
@@ -50,12 +50,8 @@ def _product(**extra: Any) -> dict[str, Any]:
 
 
 def _first_result(raw: Any) -> dict[str, Any]:
-    """Unwrap FastMCP's call_tool return into the tool's dict payload."""
-    if isinstance(raw, dict):
-        return raw
-    content = raw[0] if isinstance(raw, tuple) else raw
-    block = content[0]
-    return json.loads(block.text)
+    """Unwrap MCPServer's call_tool return into the tool's dict payload."""
+    return json.loads(raw.content[0].text)
 
 
 # ---------- config ----------
@@ -137,8 +133,8 @@ def test_shape_normalizes_list_valued_fields_consistently() -> None:
 # ---------- tool wiring ----------
 
 
-def _register_off(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
-    mcp = FastMCP("test")
+def _register_off(settings: Settings) -> tuple[MCPServer, httpx.AsyncClient]:
+    mcp = MCPServer("test")
     http = off.build_http()
     off.register(mcp, http, settings)
     return mcp, http
@@ -191,8 +187,8 @@ async def test_batch_lookup_threads_language() -> None:
     assert result["results"]["5901234123457"]["name"] == "Chocolate negro"
 
 
-def _register_exercises(settings: Settings) -> FastMCP:
-    mcp = FastMCP("test")
+def _register_exercises(settings: Settings) -> MCPServer:
+    mcp = MCPServer("test")
     api = build_api_client(settings, _StubProvider())
     exercises.register(mcp, api, settings)
     return mcp

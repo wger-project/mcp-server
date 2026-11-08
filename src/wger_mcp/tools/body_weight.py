@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
 from wger_api_client.api.measurement import (
@@ -76,7 +76,7 @@ def to_kg(value: float | None, unit: str | None) -> float | None:
     return value
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     async def _category() -> dict[str, Any]:
         """The trainee's official body-weight category.
 

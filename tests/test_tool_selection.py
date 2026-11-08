@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings, load_settings
@@ -31,7 +31,7 @@ class _StubProvider:
         pass
 
 
-def _register(mcp: FastMCP, settings: Settings) -> None:
+def _register(mcp: MCPServer, settings: Settings) -> None:
     """off talks to Open Food Facts, so it gets its own client."""
     register_all(
         mcp,
@@ -43,7 +43,7 @@ def _register(mcp: FastMCP, settings: Settings) -> None:
 
 async def _tool_names(**overrides: Any) -> set[str]:
     settings = _settings(**overrides)
-    mcp = FastMCP("test")
+    mcp = MCPServer("test")
     _register(mcp, settings)
     return {tool.name for tool in await mcp.list_tools()}
 
@@ -131,7 +131,7 @@ def test_every_group_name_is_a_valid_selection() -> None:
     """TOOL_GROUPS is the documented list, so each entry must work on its own."""
     for group in TOOL_GROUPS:
         settings = _settings(mcp_tools=[group])
-        mcp = FastMCP("test")
+        mcp = MCPServer("test")
         _register(mcp, settings)
 
 
@@ -169,4 +169,4 @@ async def test_alias_is_offered_when_a_name_is_wrong() -> None:
     assert "routines" in SELECTABLE
     assert set(GROUP_ALIASES) <= set(SELECTABLE)
     with pytest.raises(ValueError, match="routines"):
-        _register(FastMCP("test"), _settings(mcp_tools=["routine"]))
+        _register(MCPServer("test"), _settings(mcp_tools=["routine"]))

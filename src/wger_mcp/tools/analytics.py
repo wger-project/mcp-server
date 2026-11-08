@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any, NamedTuple
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client.api.exerciseinfo import exerciseinfo_list
 from wger_api_client.api.workoutlog import workoutlog_list
@@ -216,7 +216,7 @@ async def _fetch_logs(
     )
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_tool
     async def weekly_summary(

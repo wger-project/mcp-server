@@ -26,7 +26,7 @@ and use `MCP_AUTH=static_token` — it needs only a wger API key, no IdP. See th
 
 ```
 src/wger_mcp/
-├── server.py          # Starlette + FastMCP wiring, routes, lifespan
+├── server.py          # Starlette + MCPServer wiring, routes, lifespan
 ├── wger_client.py     # async httpx wrapper around the wger REST API
 ├── config.py          # pydantic-settings; auth strategy selector
 ├── auth/
@@ -51,7 +51,7 @@ Tools live in `src/wger_mcp/tools/`, one module per domain. Each module exposes
 `register(mcp, client, settings)` and is listed in `tools/__init__.py`.
 
 Within a module, each tool is an `async def` decorated with `@mcp.tool()` and
-type-annotated parameters — FastMCP turns these into the MCP tool schema
+type-annotated parameters — MCPServer turns these into the MCP tool schema
 automatically, and the docstring becomes the description the model sees, so
 write it for that audience.
 

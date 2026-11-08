@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from wger_mcp.api_client import build_api_client
 from wger_mcp.config import Settings
@@ -22,8 +22,8 @@ class _StubProvider:
         pass
 
 
-def _register() -> FastMCP:
-    mcp = FastMCP("test")
+def _register() -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -58,7 +58,7 @@ def _mock(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]]) -> _Listi
 
 
 def _results(raw: Any) -> Any:
-    payload = raw[1] if isinstance(raw, tuple) else raw
+    payload = raw.structured_content
     if isinstance(payload, dict) and "result" in payload:
         payload = payload["result"]
     return payload

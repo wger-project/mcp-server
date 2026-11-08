@@ -19,7 +19,7 @@ import asyncio
 from typing import Annotated, Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
 from ..config import Settings
@@ -158,7 +158,7 @@ def build_http() -> httpx.AsyncClient:
     )
 
 
-def register(mcp: FastMCP, http: httpx.AsyncClient, settings: Settings) -> None:
+def register(mcp: MCPServer, http: httpx.AsyncClient, settings: Settings) -> None:
     default_language = settings.default_language
 
     async def _fetch_one(code: str, lang: str) -> dict[str, Any]:
