@@ -8,12 +8,18 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+import pytest_httpx2  # noqa: F401  registers respx's httpcore2 mocker
 import respx
+import respx.mocks
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 from starlette.testclient import TestClient
 from wger_api_client.api.userprofile import userprofile_retrieve
 from wger_api_client.models.userprofile import Userprofile
+
+# The code under test speaks httpx2, so every respx.mock() has to patch httpcore2.
+# Mocked responses stay httpx.Response: respx builds and type-checks those.
+respx.mocks.DEFAULT_MOCKER = "httpcore2"
 
 #: The upstream wger every test points at (see the ``_base_env`` fixture).
 WGER_BASE = "https://wger.test"

@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 import respx
 from mcp.server.mcpserver import MCPServer
@@ -133,7 +133,7 @@ def test_shape_normalizes_list_valued_fields_consistently() -> None:
 # ---------- tool wiring ----------
 
 
-def _register_off(settings: Settings) -> tuple[MCPServer, httpx.AsyncClient]:
+def _register_off(settings: Settings) -> tuple[MCPServer, httpx2.AsyncClient]:
     mcp = MCPServer("test")
     http = off.build_http()
     off.register(mcp, http, settings)

@@ -1,7 +1,7 @@
 """MCP tool modules, grouped by domain.
 
 Each wger-facing module exposes ``register(mcp, api, settings)`` on the typed
-``wger_api_client``; ``off`` talks to Open Food Facts through its own httpx
+``wger_api_client``; ``off`` talks to Open Food Facts through its own httpx2
 client. ``server.build_app`` calls them all by default, or only the groups
 named in ``MCP_TOOLS``.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from wger_api_client.client import AuthenticatedClient
 
@@ -30,7 +30,7 @@ from . import (
     workout_sessions,
 )
 
-# The client argument is Any because off takes the Open Food Facts httpx
+# The client argument is Any because off takes the Open Food Facts httpx2
 # client where the others take the wger one.
 Registrar = Callable[[MCPServer, Any, Settings], None]
 
@@ -74,7 +74,7 @@ def expand(names: Iterable[str]) -> set[str]:
 
 
 def register_all(
-    mcp: MCPServer, api: AuthenticatedClient, off_http: httpx.AsyncClient, settings: Settings
+    mcp: MCPServer, api: AuthenticatedClient, off_http: httpx2.AsyncClient, settings: Settings
 ) -> None:
     """Register tool modules on the given MCPServer instance.
 

@@ -8,7 +8,7 @@ import asyncio
 from datetime import date, timedelta
 from typing import Annotated, Any, NamedTuple
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
@@ -320,7 +320,7 @@ def register_read(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) 
             rows = await paginate(
                 exercise_translation_list.asyncio, client=api, limit=50, exercise=exercise_id
             )
-        except (UnexpectedStatus, httpx.HTTPError):
+        except (UnexpectedStatus, httpx2.HTTPError):
             return  # a name that will not resolve must not fail the whole plan
         named = [r for r in rows if isinstance(r, dict) and r.get("name")]
         best = next((r["name"] for r in named if r.get("language") == language_id), None)
@@ -542,7 +542,7 @@ def register_read(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) 
                     slot_entry=entry_id,
                     ordering="iteration",
                 )
-            except (UnexpectedStatus, httpx.HTTPError) as exc:
+            except (UnexpectedStatus, httpx2.HTTPError) as exc:
                 return kind, api_err(exc)
 
         results = await asyncio.gather(*[_fetch(k) for k in targets])
@@ -965,7 +965,7 @@ def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings)
                         weight_unit=as_weight_unit(weight_unit)
                     ),
                 )
-            except (UnexpectedStatus, httpx.HTTPError) as exc:
+            except (UnexpectedStatus, httpx2.HTTPError) as exc:
                 return api_err(exc) | {"stage": "slot-entry weight_unit"}
         body = cfg.request(
             slot_entry=entry,
@@ -983,7 +983,7 @@ def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings)
         """Best-effort delete of a slot this module has just created."""
         try:
             await slot_destroy.asyncio_detailed(id=slot_id, client=api)
-        except (UnexpectedStatus, httpx.HTTPError):
+        except (UnexpectedStatus, httpx2.HTTPError):
             return False
         return True
 
@@ -1057,7 +1057,7 @@ def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings)
             slot = await slot_create.asyncio(
                 client=api, body=api_models.SlotRequest(day=day, order=slot_order)
             )
-        except (UnexpectedStatus, httpx.HTTPError) as exc:
+        except (UnexpectedStatus, httpx2.HTTPError) as exc:
             return api_err(exc) | {"stage": "slot"}
         result["slot_id"] = slot.id
 
@@ -1073,7 +1073,7 @@ def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings)
                     type_=entry_type,
                 ),
             )
-        except (UnexpectedStatus, httpx.HTTPError) as exc:
+        except (UnexpectedStatus, httpx2.HTTPError) as exc:
             # A slot holding no entry renders nowhere in the plan, so a caller
             # cannot see it to clean it up. Undo it rather than leave it behind.
             rolled_back = await _discard_slot(slot.id)
@@ -1108,7 +1108,7 @@ def register_write(mcp: MCPServer, api: AuthenticatedClient, settings: Settings)
             result[f"{kind}_config_id"] = outcome.id
         if failed is not None:
             kind, exc = failed
-            if not isinstance(exc, UnexpectedStatus | httpx.HTTPError):
+            if not isinstance(exc, UnexpectedStatus | httpx2.HTTPError):
                 raise exc
             return result | api_err(exc) | {"stage": f"{kind}-config"}
 

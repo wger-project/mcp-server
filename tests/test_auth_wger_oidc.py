@@ -14,6 +14,7 @@ import asyncio
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 import respx
 from pydantic import ValidationError
@@ -223,7 +224,7 @@ def test_a_grant_without_api_read_is_a_403(mock_wger_oidc: respx.MockRouter) -> 
 
 @pytest.mark.parametrize(
     "response",
-    [httpx.ConnectError("down"), httpx.Response(502), httpx.Response(429)],
+    [httpx2.ConnectError("down"), httpx.Response(502), httpx.Response(429)],
 )
 def test_an_unavailable_wger_is_a_503_not_a_401(
     mock_wger_oidc: respx.MockRouter, response: Exception | httpx.Response
@@ -269,7 +270,7 @@ def test_a_failed_lookup_is_not_cached(mock_wger_oidc: respx.MockRouter) -> None
     route = mock_wger_oidc.get(WGER_USERPROFILE)
     route.mock(
         side_effect=[
-            httpx.ConnectError("down"),
+            httpx2.ConnectError("down"),
             httpx.Response(200, json={"username": "alice"}),
         ]
     )

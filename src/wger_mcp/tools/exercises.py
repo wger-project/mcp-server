@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client.api.exercisecategory import exercisecategory_list
@@ -187,7 +187,7 @@ def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> No
             async with sem:
                 try:
                     return q, await _search(q, lang, limit_per_query)
-                except (UnexpectedStatus, httpx.HTTPError) as exc:
+                except (UnexpectedStatus, httpx2.HTTPError) as exc:
                     return q, [api_err(exc)]
 
         results = dict(await asyncio.gather(*[_one(q) for q in unique]))

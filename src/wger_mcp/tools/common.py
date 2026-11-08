@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
-import httpx
+import httpx2
 from wger_api_client.api.language import language_list
 from wger_api_client.api.userprofile import userprofile_retrieve
 from wger_api_client.client import AuthenticatedClient
@@ -107,7 +107,7 @@ def _scope_hint(detail: Any) -> str | None:
     )
 
 
-def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
+def api_err(exc: UnexpectedStatus | httpx2.HTTPError) -> dict[str, Any]:
     """Shape an upstream failure as a tool-response dict.
 
     A rejected token or a missing scope carries a ``hint`` on top of the raw
@@ -128,18 +128,18 @@ def api_err(exc: UnexpectedStatus | httpx.HTTPError) -> dict[str, Any]:
     return {"error": True, "status": 503, "detail": _transport_detail(exc)}
 
 
-def _transport_detail(exc: httpx.HTTPError) -> str:
+def _transport_detail(exc: httpx2.HTTPError) -> str:
     """Say which way the call failed, in words the operator can act on.
 
-    httpx raises most transport errors with an empty message — ``str()`` on a
+    httpx2 raises most transport errors with an empty message — ``str()`` on a
     ReadTimeout is ``''`` — so without the type the reason is simply missing,
     and a timeout reads as an unreachable server. The two need different
     answers: one is a slow query or an undersized instance, the other a wrong
     URL or a server that is down.
     """
-    if isinstance(exc, httpx.ConnectTimeout):
+    if isinstance(exc, httpx2.ConnectTimeout):
         return f"wger did not accept a connection within {REQUEST_TIMEOUT_SECONDS:g}s"
-    if isinstance(exc, httpx.TimeoutException):
+    if isinstance(exc, httpx2.TimeoutException):
         # Read, write or pool: the connection stood, the answer did not arrive.
         return (
             f"wger did not answer within {REQUEST_TIMEOUT_SECONDS:g}s. The request "
@@ -262,7 +262,7 @@ def language_id_resolver(api: AuthenticatedClient) -> Callable[[str], Awaitable[
         if code not in cache:
             try:
                 rows = await paginate(language_list.asyncio, client=api, limit=5, short_name=code)
-            except (UnexpectedStatus, httpx.HTTPError):
+            except (UnexpectedStatus, httpx2.HTTPError):
                 return None
             cache[code] = next(
                 (r.get("id") for r in rows if isinstance(r, dict) and r.get("id")), None
@@ -378,7 +378,7 @@ def api_tool(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any
             return await func(*args, **kwargs)
         except ToolInputError as exc:
             return bad_request(str(exc))
-        except (UnexpectedStatus, httpx.HTTPError) as exc:
+        except (UnexpectedStatus, httpx2.HTTPError) as exc:
             return api_err(exc)
 
     return wrapper
@@ -393,7 +393,7 @@ def api_list_tool(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitabl
             return await func(*args, **kwargs)
         except ToolInputError as exc:
             return [bad_request(str(exc))]
-        except (UnexpectedStatus, httpx.HTTPError) as exc:
+        except (UnexpectedStatus, httpx2.HTTPError) as exc:
             return [api_err(exc)]
 
     return wrapper

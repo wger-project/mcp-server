@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, Protocol
 
-import httpx
+import httpx2
 from wger_api_client.client import AuthenticatedClient
 
 from . import __version__
@@ -34,15 +34,15 @@ _UNUSED_TOKEN = "unused-async-client-authenticates-per-request"
 REQUEST_TIMEOUT_SECONDS = 20.0
 
 
-class _ProviderAuth(httpx.Auth):
+class _ProviderAuth(httpx2.Auth):
     """Resolves the Authorization header per request from the token provider."""
 
     def __init__(self, provider: WgerTokenProvider) -> None:
         self._provider = provider
 
     async def async_auth_flow(
-        self, request: httpx.Request
-    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        self, request: httpx2.Request
+    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
         request.headers["Authorization"] = await self._provider.authorization_header()
         yield request
 
@@ -51,7 +51,7 @@ def build_api_client(settings: Settings, provider: WgerTokenProvider) -> Authent
     """One shared typed client; auth is per-request via ``_ProviderAuth``.
 
     Only the async half is wired up. The generated client's synchronous
-    functions would build their own httpx client from ``token`` and send that
+    functions would build their own httpx2 client from ``token`` and send that
     placeholder as a credential, so this server never calls them.
     """
     base_url = str(settings.wger_base_url).rstrip("/")
@@ -61,7 +61,7 @@ def build_api_client(settings: Settings, provider: WgerTokenProvider) -> Authent
         raise_on_unexpected_status=True,
     )
     api.set_async_httpx_client(
-        httpx.AsyncClient(
+        httpx2.AsyncClient(
             base_url=base_url,
             auth=_ProviderAuth(provider),
             timeout=REQUEST_TIMEOUT_SECONDS,

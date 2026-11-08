@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 
 import anyio
-import httpx
+import httpx2
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -67,7 +67,7 @@ class Server:
 
     mcp: MCPServer
     api: AuthenticatedClient
-    off_http: httpx.AsyncClient
+    off_http: httpx2.AsyncClient
     provider: WgerTokenProvider
 
     async def aclose(self) -> None:

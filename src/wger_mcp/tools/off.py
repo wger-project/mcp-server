@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
@@ -149,16 +149,16 @@ def _shape(prod: dict[str, Any], lang: str) -> dict[str, Any]:
     }
 
 
-def build_http() -> httpx.AsyncClient:
+def build_http() -> httpx2.AsyncClient:
     """The OFF client; the caller owns and closes it."""
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         base_url=_OFF_BASE_URL,
         timeout=_OFF_TIMEOUT,
         headers={"User-Agent": "wger-mcp/0.1 (+OFF-lookup)"},
     )
 
 
-def register(mcp: MCPServer, http: httpx.AsyncClient, settings: Settings) -> None:
+def register(mcp: MCPServer, http: httpx2.AsyncClient, settings: Settings) -> None:
     default_language = settings.default_language
 
     async def _fetch_one(code: str, lang: str) -> dict[str, Any]:
@@ -173,7 +173,7 @@ def register(mcp: MCPServer, http: httpx.AsyncClient, settings: Settings) -> Non
                 resp = await http.get(
                     f"/api/v2/product/{code}.json", params={"fields": _fields_for(lang)}
                 )
-            except httpx.HTTPError as exc:
+            except httpx2.HTTPError as exc:
                 return _err(503, f"OFF unreachable: {exc}")
             if resp.status_code == 429 and attempt == 1:
                 # Respect server's Retry-After if present, else our default.

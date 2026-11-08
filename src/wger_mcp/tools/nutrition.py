@@ -10,7 +10,7 @@ import asyncio
 from datetime import date, datetime
 from typing import Annotated, Any
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
@@ -450,7 +450,7 @@ def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> No
                     if need_weight
                     else _none(),
                 )
-            except (UnexpectedStatus, httpx.HTTPError) as exc:
+            except (UnexpectedStatus, httpx2.HTTPError) as exc:
                 return api_err(exc)
 
             if profile is not None:
@@ -539,7 +539,7 @@ def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> No
                     body=api_models.PatchedUserprofileRequest(calories=int(target_kcal)),
                 )
                 result["profile_update"] = {"applied": True, "calories": patched.calories}
-            except (UnexpectedStatus, httpx.HTTPError) as exc:
+            except (UnexpectedStatus, httpx2.HTTPError) as exc:
                 result["profile_update"] = {"applied": False, "error": api_err(exc)}
 
         return result
@@ -621,7 +621,7 @@ def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> No
                 try:
                     ing = await ingredient_retrieve.asyncio(id=iid, client=api)
                     return iid, ing.to_dict()
-                except (UnexpectedStatus, httpx.HTTPError) as exc:
+                except (UnexpectedStatus, httpx2.HTTPError) as exc:
                     return iid, {"_err": api_err(exc)}
 
         async def _fetch_unit(uid: int) -> tuple[int, dict[str, Any]]:
@@ -629,7 +629,7 @@ def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> No
                 try:
                     unit = await ingredientweightunit_retrieve.asyncio(id=uid, client=api)
                     return uid, unit.to_dict()
-                except (UnexpectedStatus, httpx.HTTPError) as exc:
+                except (UnexpectedStatus, httpx2.HTTPError) as exc:
                     return uid, {"_err": api_err(exc)}
 
         cache, units = await asyncio.gather(

@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any, NamedTuple
 
-import httpx
+import httpx2
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client.api.exerciseinfo import exerciseinfo_list
@@ -111,7 +111,7 @@ async def _load_ex_meta(
     async def _fetch(ids: list[int]) -> list[dict[str, Any]]:
         try:
             return await paginate(exerciseinfo_list.asyncio, client=api, limit=len(ids), id_in=ids)
-        except (UnexpectedStatus, httpx.HTTPError):
+        except (UnexpectedStatus, httpx2.HTTPError):
             return []
 
     batches = [missing[i : i + _EX_META_BATCH] for i in range(0, len(missing), _EX_META_BATCH)]

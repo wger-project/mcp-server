@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+import httpx2
 import pytest
 import respx
 
@@ -29,7 +30,7 @@ def test_a_provider_that_is_still_booting_is_waited_for() -> None:
         route = router.get(WGER_DISCOVERY)
         route.mock(
             side_effect=[
-                httpx.ConnectError("refused"),
+                httpx2.ConnectError("refused"),
                 httpx.Response(502),
                 httpx.Response(200, json=wger_discovery_doc()),
             ]
@@ -41,7 +42,7 @@ def test_a_provider_that_is_still_booting_is_waited_for() -> None:
 
 def test_it_gives_up_after_the_last_retry() -> None:
     with respx.mock() as router:
-        route = router.get(WGER_DISCOVERY).mock(side_effect=httpx.ConnectError("refused"))
+        route = router.get(WGER_DISCOVERY).mock(side_effect=httpx2.ConnectError("refused"))
         with pytest.raises(OidcDiscoveryError, match="refused"):
             discover_endpoints(WGER_BASE, retry_delays=(0, 0))
     assert route.call_count == 3

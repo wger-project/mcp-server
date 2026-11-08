@@ -663,6 +663,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-httpx2"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "respx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/d1/70e7edb50679ddd34ba5e13ac1d6e1223bc4e24d0a5fc30587f8fbe884c4/pytest_httpx2-1.0.0.tar.gz", hash = "sha256:d897a14c1341d3f3014e9432c16fed366598aba06a2ba9c08460a51799cb7128", size = 2882, upload-time = "2026-05-20T08:26:41.442Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/e1/5e38e8de42fba9667846a43113469c7481d01db4b6511e42645385bace8f/pytest_httpx2-1.0.0-py3-none-any.whl", hash = "sha256:467dc7f6946854ffc20e1678703266b093037d8f3fb9f1fb523a2c432c64cff0", size = 4504, upload-time = "2026-05-20T08:26:40.219Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1233,15 +1245,15 @@ wheels = [
 
 [[package]]
 name = "wger-api-client"
-version = "2.7.0"
+version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
-    { name = "httpx" },
+    { name = "httpx2" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/34/443ef1586f2bf467a1ffc4f34a1ddf3231cbeea048093be6295420880f2c/wger_api_client-2.7.0.tar.gz", hash = "sha256:a1407ee8a4068adafd73494d339cfdca0fbdd3a523b3d99d830ea5d95ffb017c", size = 181494, upload-time = "2026-09-28T16:55:22.956Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b2/a3/303f60be8d8a3ab1fe8a56b767c79571c58750cc9afdfa49f28c0a3e0d7e/wger_api_client-2.7.1.tar.gz", hash = "sha256:9ef2a85bd309c11d9a66bd0fdec0660d1a661659b7338c709ce6c82818955cb2", size = 182343, upload-time = "2026-11-08T19:03:24.459Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/5d/5a68fa0087681e6b9a71e7a89e36208b1f34c13515b94afc3e283672f3c2/wger_api_client-2.7.0-py3-none-any.whl", hash = "sha256:6e997196fb7b0870e525ba29150233d6f620470f257767ecfcd9fc47760760c0", size = 634105, upload-time = "2026-09-28T16:55:20.947Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/17/a94deccff1f58296f87dc5ee27daecfca60ef24c30a709d4aa9beda6a8de/wger_api_client-2.7.1-py3-none-any.whl", hash = "sha256:d644e64a6b575a7d37b84ca24e4a95f3adffe1b4187cd95a2be5c3b4743332bb", size = 634039, upload-time = "2026-11-08T19:03:22.455Z" },
 ]
 
 [[package]]
@@ -1250,7 +1262,7 @@ version = "2.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "joserfc" },
     { name = "mcp", extra = ["cli"] },
     { name = "packaging" },
@@ -1265,6 +1277,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-httpx2" },
     { name = "respx" },
     { name = "ruff" },
 ]
@@ -1272,7 +1285,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.9" },
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx2", specifier = ">=2.13,<3" },
     { name = "joserfc", specifier = ">=1.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=2.3,<3" },
     { name = "packaging", specifier = ">=23" },
@@ -1280,13 +1293,14 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "wger-api-client", specifier = ">=2.7,<2.8" },
+    { name = "wger-api-client", specifier = ">=2.7.1,<2.8" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pytest-httpx2", specifier = ">=1.0" },
     { name = "respx", specifier = ">=0.21" },
     { name = "ruff", specifier = ">=0.6" },
 ]

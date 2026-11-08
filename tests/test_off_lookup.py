@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 import respx
 from mcp.server.mcpserver import MCPServer
@@ -33,7 +34,7 @@ def _settings(**overrides: Any) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
-def _register_off(settings: Settings) -> tuple[MCPServer, httpx.AsyncClient]:
+def _register_off(settings: Settings) -> tuple[MCPServer, httpx2.AsyncClient]:
     mcp = MCPServer("test")
     http = off.build_http()
     off.register(mcp, http, settings)

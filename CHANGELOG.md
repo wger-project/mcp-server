@@ -11,6 +11,12 @@ notes. This file records important changes to *this package*.
   `serverInfo` instead of the SDK's. The SDK raises the floors of `anyio`
   (4.9) and `pydantic` (2.12) and pulls in `httpx2` and `opentelemetry-api`;
   tracing stays inert unless an OpenTelemetry SDK is configured.
+* All HTTP traffic now goes through `httpx2` instead of `httpx`, the stack
+  that mcp 2 and `wger-api-client` 2.7.1 are built on, so a single client
+  library handles every request and the errors the tools report on are the
+  ones it raises. TLS certificates are checked against the system trust
+  store instead of `certifi`'s bundle; the Docker image ships one. Requires
+  `wger-api-client>=2.7.1`.
 
 ## 2.7.0
 
