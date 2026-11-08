@@ -17,6 +17,8 @@ notes. This file records important changes to *this package*.
   ones it raises. TLS certificates are checked against the system trust
   store instead of `certifi`'s bundle; the Docker image ships one. Requires
   `wger-api-client>=2.7.1`.
+* Tested on Python 3.11 through 3.15. The lock file is refreshed so that
+  every compiled dependency has wheels for 3.15.
 
 ## 2.7.0
 
