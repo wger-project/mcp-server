@@ -27,7 +27,6 @@ and use `MCP_AUTH=static_token` — it needs only a wger API key, no IdP. See th
 ```
 src/wger_mcp/
 ├── server.py          # Starlette + MCPServer wiring, routes, lifespan
-├── wger_client.py     # async httpx wrapper around the wger REST API
 ├── config.py          # pydantic-settings; auth strategy selector
 ├── auth/
 │   ├── __init__.py    # build_auth_middleware / build_token_provider factories
