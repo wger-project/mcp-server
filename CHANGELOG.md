@@ -5,6 +5,12 @@ notes. This file records important changes to *this package*.
 
 ## Unreleased
 
+* `list_routines` returns only the user's own routines. wger's `/routine/`
+  also lists every user's public templates, so on a busy instance the
+  user's plans were buried among strangers' and a model could mistake one for
+  theirs. Templates now have their own tools: `list_templates` for the user's
+  own, `list_public_templates` for the ones shared on the instance.
+
 ## 2.7.0
 
 **Requires wger 2.7.** The 2.7 API renamed and retyped fields this server
