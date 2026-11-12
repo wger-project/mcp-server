@@ -9,7 +9,7 @@ a date filter silently.
 
 from __future__ import annotations
 
-import httpx
+import httpx2
 import pytest
 from starlette.testclient import TestClient
 
@@ -30,14 +30,14 @@ def _settings() -> Settings:
 
 def _answering(monkeypatch: pytest.MonkeyPatch, handler) -> None:
     """Serve /api/v2/version/ from `handler` instead of the network."""
-    transport = httpx.MockTransport(handler)
-    original = httpx.AsyncClient
+    transport = httpx2.MockTransport(handler)
+    original = httpx2.AsyncClient
 
     def _client(*args, **kwargs):
         kwargs["transport"] = transport
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(httpx, "AsyncClient", _client)
+    monkeypatch.setattr(httpx2, "AsyncClient", _client)
 
 
 @pytest.fixture(autouse=True)
@@ -48,9 +48,9 @@ def _floor_at_2_7(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _returning(version, status: int = 200):
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == "/api/v2/version/"
-        return httpx.Response(status, json=version)
+        return httpx2.Response(status, json=version)
 
     return handler
 
@@ -100,8 +100,8 @@ async def test_an_unreachable_wger_does_not_block_the_boot(
     compatibility. Coupling our boot to theirs turns a restart order into an
     outage."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("no route to host", request=request)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("no route to host", request=request)
 
     _answering(monkeypatch, handler)
     assert await check_wger_version(_settings()) is None

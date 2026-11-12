@@ -22,7 +22,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-import httpx
+import httpx2
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -98,7 +98,7 @@ def token_rejected(status: int, detail: Any) -> bool:
     return status == 403 and isinstance(detail, dict) and detail.get("code") == "token_not_valid"
 
 
-def _error_body(resp: httpx.Response) -> Any:
+def _error_body(resp: httpx2.Response) -> Any:
     try:
         return resp.json()
     except ValueError:
@@ -145,7 +145,7 @@ class UsernameResolver:
         self._max_in_flight = max_in_flight
         self._in_flight = 0
         self._cache: OrderedDict[str, tuple[float, asyncio.Task[str | None]]] = OrderedDict()
-        self._client: httpx.AsyncClient | None = None
+        self._client: httpx2.AsyncClient | None = None
         self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def username_for(self, token: str, fingerprint: str) -> str | None:
@@ -171,7 +171,7 @@ class UsernameResolver:
         # another request is waiting on.
         try:
             username = await asyncio.shield(task)
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             # Our outage, not the token's: the next request asks again.
             self._forget(fingerprint, task)
             raise
@@ -203,14 +203,14 @@ class UsernameResolver:
         if entry is not None and entry[1] is task:
             del self._cache[fingerprint]
 
-    def _http(self) -> httpx.AsyncClient:
+    def _http(self) -> httpx2.AsyncClient:
         # One pooled client per event loop: a connection belongs to the loop
         # that opened it, and tests drive the app from more than one.
         loop = asyncio.get_running_loop()
         if self._client is None or self._client_loop is not loop:
-            self._client = httpx.AsyncClient(
+            self._client = httpx2.AsyncClient(
                 timeout=self._timeout,
-                limits=httpx.Limits(max_connections=self._max_in_flight),
+                limits=httpx2.Limits(max_connections=self._max_in_flight),
             )
             self._client_loop = loop
         return self._client
@@ -334,7 +334,7 @@ class WgerBearerMiddleware:
                 scope, receive, send, reason="too many token checks in flight"
             )
             return
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             # Not a 401: that would make the client throw away a token that
             # may well be fine.
             log.warning("could not reach wger to check the caller's token: %s", exc)

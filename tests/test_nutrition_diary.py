@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.types import UNSET
 
@@ -35,8 +35,8 @@ class _StubProvider:
         pass
 
 
-def _register() -> FastMCP:
-    mcp = FastMCP("test")
+def _register() -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",

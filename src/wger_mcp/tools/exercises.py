@@ -6,8 +6,8 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+import httpx2
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client.api.exercisecategory import exercisecategory_list
 from wger_api_client.api.exerciseinfo import exerciseinfo_list, exerciseinfo_retrieve
@@ -117,7 +117,7 @@ def _shape_exercise(
     return shaped
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     default_language = settings.default_language
     # exerciseinfo filters WHICH exercises match a language, but each one still
     # carries every translation. Picking the wrong one hands the caller a name in
@@ -187,7 +187,7 @@ def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None
             async with sem:
                 try:
                     return q, await _search(q, lang, limit_per_query)
-                except (UnexpectedStatus, httpx.HTTPError) as exc:
+                except (UnexpectedStatus, httpx2.HTTPError) as exc:
                     return q, [api_err(exc)]
 
         results = dict(await asyncio.gather(*[_one(q) for q in unique]))

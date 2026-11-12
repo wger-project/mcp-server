@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.types import UNSET
 
@@ -24,8 +24,8 @@ class _StubProvider:
         pass
 
 
-def _register() -> FastMCP:
-    mcp = FastMCP("test")
+def _register() -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -92,7 +92,7 @@ async def test_calculate_autofills_from_profile_and_weight(
     weights = SimpleNamespace(count=1, results=[SimpleNamespace(weight="82.5")])
     monkeypatch.setattr(nutrition.weightentry_list, "asyncio", _Capture(weights))
     result = await mcp.call_tool("calculate_daily_calories", {})
-    data = result[1] if isinstance(result, tuple) else result
+    data = result.structured_content
     assert data["inputs"]["sex"] == "male"
     assert data["inputs"]["height_cm"] == 180.0
     assert data["inputs"]["weight_kg"] == 82.5

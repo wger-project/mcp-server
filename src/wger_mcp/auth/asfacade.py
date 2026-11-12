@@ -42,7 +42,7 @@ import json
 import logging
 from urllib.parse import parse_qsl, urlencode
 
-import httpx
+import httpx2
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
@@ -111,7 +111,7 @@ class AuthorizationServerFacade:
         # token to it and then refuses it on its own API ("Invalid target resource").
         self._strip_resource = strip_resource
         self._auth_methods = token_endpoint_auth_methods or _DEFAULT_AUTH_METHODS
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx2.AsyncClient(timeout=timeout)
 
     @property
     def supports_registration(self) -> bool:
@@ -243,7 +243,7 @@ class AuthorizationServerFacade:
                 headers[h] = v
         try:
             resp = await self._client.post(endpoint, content=body, headers=headers)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             log.warning("%s-endpoint proxy failed: %s", what, exc)
             return JSONResponse(
                 {"error": "temporarily_unavailable", "error_description": str(exc)},

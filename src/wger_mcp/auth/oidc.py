@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 
-import httpx
+import httpx2
 from joserfc import jwt
 from joserfc.errors import InvalidKeyIdError, JoseError
 from joserfc.jwk import KeySet
@@ -76,7 +76,7 @@ class JwksCache:
             # Another request may have fetched while this one waited for the lock.
             if not self._stale(force):
                 return self._keys  # type: ignore[return-value]
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx2.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(self._uri)
                 resp.raise_for_status()
                 keys = KeySet.import_key_set(resp.json())

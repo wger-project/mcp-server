@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client import models as api_models
 from wger_api_client.api.workoutlog import (
@@ -54,7 +54,7 @@ REPS_MAX = 9999
 REST_MAX = 7200
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_tool
     async def log_set(

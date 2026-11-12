@@ -7,7 +7,7 @@ An [MCP](https://modelcontextprotocol.io) server that exposes the [wger](https:/
 
 It talks to a wger instance over its public REST API — it is a separate service and requires no changes to wger itself.
 
-- **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** (FastMCP) for a shared deployment. Pick with `--transport`.
+- **Transport:** **stdio** for a local server your MCP client spawns, or **Streamable HTTP** for a shared deployment. Pick with `--transport`.
 - **Auth:** **multi-user** — every request acts as the calling user's own wger account. wger is itself the OAuth2/OIDC provider, so nothing else is needed ([`MCP_AUTH=wger_oidc`](#wger_oidc--wger-is-the-provider-recommended)); behind an existing SSO, an external OIDC IdP does the same job with a token exchange ([`MCP_AUTH=oidc`](#oidc--an-external-idp)). For single-user self-hosting, [`MCP_AUTH=static_token`](#static_token--single-user-no-idp-required) takes a shared secret plus your wger API key instead.
 - **Requires:** wger >= 2.7, Python >= 3.11. The server reads wger's version once at startup and warns if it is older than the API client expects (the major and minor of the installed `wger-api-client`), naming both. It warns rather than refuses: the exercise and ingredient catalogs are stable across releases and keep working, while the tools built on newer endpoints fail visibly when called.
 
@@ -542,8 +542,8 @@ uv run ruff check .
 
 ### Source layout
 
-- [`src/wger_mcp/server.py`](src/wger_mcp/server.py) — Starlette + FastMCP wiring, lifespan, healthcheck, OAuth metadata, auth middleware.
-- [`src/wger_mcp/api_client.py`](src/wger_mcp/api_client.py) — bridge to the generated [`wger-api-client`](https://pypi.org/project/wger-api-client/): resolves the per-request wger credential from the token provider via a custom httpx auth, plus offset pagination over the generated `*_list` endpoints.
+- [`src/wger_mcp/server.py`](src/wger_mcp/server.py) — Starlette + MCPServer wiring, lifespan, healthcheck, OAuth metadata, auth middleware.
+- [`src/wger_mcp/api_client.py`](src/wger_mcp/api_client.py) — bridge to the generated [`wger-api-client`](https://pypi.org/project/wger-api-client/): resolves the per-request wger credential from the token provider via a custom httpx2 auth, plus offset pagination over the generated `*_list` endpoints.
 - [`src/wger_mcp/auth/`](src/wger_mcp/auth/) — inbound OIDC validation (`oidc.py`, discovery in `oidc_discovery.py`), token exchange + outbound credential provider (`exchange.py`), per-request identity (`identity.py`), OAuth metadata (`oauth.py`).
 - [`src/wger_mcp/tools/`](src/wger_mcp/tools/) — one module per domain. Each exposes `register(mcp, api, settings)`; [`tools/__init__.py`](src/wger_mcp/tools/__init__.py) registers them all.
 

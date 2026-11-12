@@ -3,7 +3,7 @@
 The inbound auth middleware resolves the caller (from an SSO/OIDC token, or a
 fixed dev identity for ``MCP_AUTH=none``) and binds an :class:`Identity` for the
 duration of the request. The outbound auth reads it to obtain a wger
-credential for that specific user. Using a ``ContextVar`` keeps the FastMCP
+credential for that specific user. Using a ``ContextVar`` keeps the MCPServer
 tools — which only receive the shared API client — unaware of the request
 plumbing.
 """

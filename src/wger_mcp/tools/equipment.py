@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 from wger_api_client.api.equipment import equipment_list, equipment_retrieve
 from wger_api_client.client import AuthenticatedClient
@@ -18,7 +18,7 @@ from ..config import Settings
 from .common import api_list_tool, api_tool, as_int
 
 
-def register(mcp: FastMCP, api: AuthenticatedClient, settings: Settings) -> None:
+def register(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) -> None:
     @mcp.tool()
     @api_list_tool
     async def list_gym_equipment(

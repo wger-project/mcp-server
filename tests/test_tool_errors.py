@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.errors import UnexpectedStatus
 
@@ -36,15 +36,15 @@ def _settings() -> Settings:
     )
 
 
-def _register(module: Any) -> FastMCP:
-    mcp = FastMCP("test")
+def _register(module: Any) -> MCPServer:
+    mcp = MCPServer("test")
     settings = _settings()
     module.register(mcp, build_api_client(settings, _StubProvider()), settings)
     return mcp
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 def _raiser(exc: Exception):
@@ -63,7 +63,7 @@ async def test_transport_failure_becomes_an_error_dict() -> None:
 
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise httpx.ConnectError("connection refused")
+        raise httpx2.ConnectError("connection refused")
 
     out = await tool()
     assert out["error"] is True
@@ -79,7 +79,7 @@ async def test_a_read_timeout_is_not_reported_as_unreachable() -> None:
 
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise httpx.ReadTimeout("")
+        raise httpx2.ReadTimeout("")
 
     out = await tool()
     assert out["status"] == 503
@@ -91,7 +91,7 @@ async def test_a_read_timeout_is_not_reported_as_unreachable() -> None:
 async def test_a_connect_timeout_names_the_budget_it_spent() -> None:
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise httpx.ConnectTimeout("")
+        raise httpx2.ConnectTimeout("")
 
     out = await tool()
     assert "did not accept a connection within 20s" in out["detail"]
@@ -99,12 +99,12 @@ async def test_a_connect_timeout_names_the_budget_it_spent() -> None:
 
 @pytest.mark.asyncio
 async def test_a_silent_transport_error_still_names_its_kind() -> None:
-    """httpx raises these with an empty message, which used to leave the detail
+    """httpx2 raises these with an empty message, which used to leave the detail
     as a bare "wger is unreachable: " — true, but useless."""
 
     @api_tool
     async def tool() -> dict[str, Any]:
-        raise httpx.RemoteProtocolError("")
+        raise httpx2.RemoteProtocolError("")
 
     out = await tool()
     assert out["detail"] == "wger is unreachable: RemoteProtocolError"
@@ -325,7 +325,7 @@ async def test_rollback_failure_still_reports_the_slot(monkeypatch: pytest.Monke
         routines.slot_entry_create, "asyncio", _raiser(UnexpectedStatus(400, b"nope"))
     )
     monkeypatch.setattr(
-        routines.slot_destroy, "asyncio_detailed", _raiser(httpx.ConnectError("down"))
+        routines.slot_destroy, "asyncio_detailed", _raiser(httpx2.ConnectError("down"))
     )
 
     mcp = _register(routines)

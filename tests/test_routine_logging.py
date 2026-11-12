@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.types import UNSET
 
@@ -29,8 +29,8 @@ class _StubProvider:
         pass
 
 
-def _register(module: Any) -> FastMCP:
-    mcp = FastMCP("test")
+def _register(module: Any) -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -61,7 +61,7 @@ class _Capture:
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 def _set_config(**overrides: Any) -> dict[str, Any]:

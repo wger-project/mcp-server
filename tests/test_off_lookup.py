@@ -12,9 +12,10 @@ import json
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 import respx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from wger_mcp.config import Settings
 from wger_mcp.tools import off
@@ -33,19 +34,16 @@ def _settings(**overrides: Any) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
-def _register_off(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
-    mcp = FastMCP("test")
+def _register_off(settings: Settings) -> tuple[MCPServer, httpx2.AsyncClient]:
+    mcp = MCPServer("test")
     http = off.build_http()
     off.register(mcp, http, settings)
     return mcp, http
 
 
 def _first_result(raw: Any) -> dict[str, Any]:
-    """Unwrap FastMCP's call_tool return into the tool's dict payload."""
-    if isinstance(raw, dict):
-        return raw
-    content = raw[0] if isinstance(raw, tuple) else raw
-    return json.loads(content[0].text)
+    """Unwrap MCPServer's call_tool return into the tool's dict payload."""
+    return json.loads(raw.content[0].text)
 
 
 def _product() -> dict[str, Any]:

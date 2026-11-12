@@ -12,7 +12,7 @@ import logging
 import time
 from typing import NamedTuple
 
-import httpx
+import httpx2
 
 log = logging.getLogger(__name__)
 
@@ -87,11 +87,11 @@ def discover_endpoints(
 def _fetch_document(url: str, timeout: float, retry_delays: tuple[float, ...]) -> dict:
     for delay in (*retry_delays, None):
         try:
-            resp = httpx.get(url, timeout=timeout)
+            resp = httpx2.get(url, timeout=timeout)
             resp.raise_for_status()
             doc = resp.json()
-        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-            retryable = not isinstance(exc, httpx.HTTPStatusError) or (
+        except (httpx2.TransportError, httpx2.HTTPStatusError) as exc:
+            retryable = not isinstance(exc, httpx2.HTTPStatusError) or (
                 exc.response.status_code >= 500
             )
             if not retryable or delay is None:
@@ -100,7 +100,7 @@ def _fetch_document(url: str, timeout: float, retry_delays: tuple[float, ...]) -
             log.warning("OIDC discovery at %s failed (%s); retrying in %gs", url, exc, delay)
             time.sleep(delay)
             continue
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx2.HTTPError, ValueError) as exc:
             raise OidcDiscoveryError(f"OIDC discovery failed for {url}: {exc}") from exc
         if not isinstance(doc, dict):
             raise OidcDiscoveryError(f"discovery document at {url} is not an object")

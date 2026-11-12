@@ -6,9 +6,9 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from wger_api_client import models as api_models
 from wger_api_client.types import UNSET
 
@@ -31,8 +31,8 @@ class _StubProvider:
         pass
 
 
-def _register(module: Any) -> FastMCP:
-    mcp = FastMCP("test")
+def _register(module: Any) -> MCPServer:
+    mcp = MCPServer("test")
     settings = Settings(  # type: ignore[call-arg]
         wger_base_url="https://wger.test",
         mcp_auth="none",
@@ -72,7 +72,7 @@ def _profile(monkeypatch: pytest.MonkeyPatch, unit: Any) -> None:
 
 
 def _result(raw: Any) -> Any:
-    return raw[1] if isinstance(raw, tuple) else raw
+    return raw.structured_content
 
 
 # ---------- log_set ----------
@@ -132,7 +132,7 @@ async def test_explicit_unit_beats_the_profile(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.parametrize(
     "failure",
     [
-        httpx.ConnectError("profile unreachable"),
+        httpx2.ConnectError("profile unreachable"),
         # from_dict raises TypeError for a unit outside {kg, lb}
         # (check_weight_unit_enum) and KeyError for a field it needs; neither is
         # a ValueError, which is why both are named.

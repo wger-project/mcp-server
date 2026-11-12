@@ -23,7 +23,7 @@ import logging
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
 
-import httpx
+import httpx2
 from packaging.version import InvalidVersion, Version
 from wger_api_client.api.version import version_retrieve
 from wger_api_client.client import Client
@@ -85,7 +85,7 @@ async def _reported_version(base_url: str) -> str | None:
     user's identity, and at startup there is no caller.
     """
     client = Client(base_url=base_url, raise_on_unexpected_status=True)
-    client.set_async_httpx_client(httpx.AsyncClient(base_url=base_url, timeout=_TIMEOUT))
+    client.set_async_httpx_client(httpx2.AsyncClient(base_url=base_url, timeout=_TIMEOUT))
     try:
         return await version_retrieve.asyncio(client=client)
     finally:
@@ -107,7 +107,7 @@ async def check_wger_version(settings: Settings) -> str | None:
     base_url = str(settings.wger_base_url).rstrip("/")
     try:
         found = await _reported_version(base_url)
-    except (httpx.HTTPError, UnexpectedStatus, ValueError) as exc:
+    except (httpx2.HTTPError, UnexpectedStatus, ValueError) as exc:
         # Unreachable, answering with something other than 200, or answering
         # with something that is not JSON — a reverse proxy in front of a wger
         # that is still booting produces all three

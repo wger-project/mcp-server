@@ -18,20 +18,24 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
 dependencies = [
-    # <2 is a hard requirement, not caution: mcp 2.0 removed mcp.server.fastmcp
-    # (it is mcp.server.mcpserver there), so server.py does not import under it.
-    "mcp[cli]>=1.12,<2",
+    # <3 because each SDK major has so far renamed the server module and moved
+    # constructor parameters; server.py does not survive that unchanged.
+    "mcp[cli]>=2.3,<3",
     # Imported directly by server.py (anyio.run drives the stdio transport), so
     # declared rather than borrowed from mcp/starlette/httpx: the day one of them
-    # stops depending on it, the console script dies on import. >=4.5 matches
+    # stops depending on it, the console script dies on import. >=4.9 matches
     # mcp's own floor.
-    "anyio>=4.5",
-    "httpx>=0.27",
+    "anyio>=4.9",
+    # Same HTTP stack as wger-api-client and mcp, so the exceptions our except
+    # clauses name are the ones actually raised.
+    "httpx2>=2.13,<3",
     # compat.py compares the wger version it finds against the one these
     # tools need. Declared rather than borrowed from the many dependencies
     # that already pull it, and preferred over a hand-rolled parse: wger
@@ -40,13 +44,13 @@ dependencies = [
     "packaging>=23",
     "pydantic-settings>=2.4",
     # Also imported directly, by config.py and every tool module (Field,
-    # validators, HttpUrl) — not just borrowed from pydantic-settings. >=2.7
-    # matches that package's own floor.
-    "pydantic>=2.7",
+    # validators, HttpUrl) — not just borrowed from pydantic-settings. >=2.12
+    # matches mcp's floor.
+    "pydantic>=2.12",
     "joserfc>=1.0",
     "starlette>=0.37",
     "uvicorn[standard]>=0.30",
-    "wger-api-client>=2.7,<2.8",
+    "wger-api-client>=2.7.1,<2.8",
 ]
 
 [project.scripts]
@@ -88,6 +92,8 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "respx>=0.21",
+    # respx mocks httpcore only; this registers the httpcore2 mocker httpx2 needs.
+    "pytest-httpx2>=1.0",
 ]
 
 [tool.ruff]

@@ -30,7 +30,7 @@ import logging
 import time
 from typing import Any
 
-import httpx
+import httpx2
 
 from .identity import Identity, current_identity
 
@@ -78,7 +78,7 @@ class TokenExchanger:
         self._wger_audience = wger_audience
         self._provider_token_url = provider_token_url
         self._provider = provider
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx2.AsyncClient(timeout=timeout)
         # subject -> (wger_access_token, expires_at_epoch)
         self._cache: dict[str, tuple[str, float]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -138,7 +138,7 @@ class TokenExchanger:
         }
         try:
             resp = await self._client.post(self._token_endpoint, data=data)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise WgerTokenError(f"IdP token-exchange unreachable: {exc}") from exc
         if resp.status_code >= 400:
             raise WgerTokenError(
@@ -168,7 +168,7 @@ class TokenExchanger:
         body = {"provider": self._provider, "process": "login", "token": token_obj}
         try:
             resp = await self._client.post(self._provider_token_url, json=body)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise WgerTokenError(f"wger provider/token unreachable: {exc}") from exc
         if resp.status_code >= 400:
             raise WgerTokenError(
