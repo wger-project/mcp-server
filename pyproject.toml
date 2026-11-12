@@ -1,6 +1,6 @@
 [project]
 name = "wger-mcp"
-version = "2.7.0"
+version = "2.7.1"
 description = "MCP server exposing the wger fitness/nutrition REST API as tools, with pluggable auth"
 readme = "README.md"
 requires-python = ">=3.11"
