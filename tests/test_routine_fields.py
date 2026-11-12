@@ -102,6 +102,41 @@ async def test_patching_sharing_leaves_the_rest_alone(monkeypatch: pytest.Monkey
     assert patch.body.to_dict() == {"is_public": False}
 
 
+# ---------- listing: own routines vs. templates ----------
+
+
+def _page(*items: Any) -> Any:
+    return api_models.PaginatedRoutineList(count=len(items), results=list(items))
+
+
+@pytest.mark.asyncio
+async def test_list_routines_leaves_out_templates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """wger's /routine/ also returns every user's public templates."""
+    mcp = _register()
+    listing = _Capture(_page(ROUTINE))
+    monkeypatch.setattr(routines.routine_list, "asyncio", listing)
+    await mcp.call_tool("list_routines", {})
+    assert listing.calls[0]["is_template"] is False
+
+
+@pytest.mark.parametrize(
+    ("tool", "endpoint"),
+    [
+        ("list_templates", routines.templates_list),
+        ("list_public_templates", routines.public_templates_list),
+    ],
+)
+@pytest.mark.asyncio
+async def test_templates_come_from_their_own_endpoints(
+    monkeypatch: pytest.MonkeyPatch, tool: str, endpoint: Any
+) -> None:
+    mcp = _register()
+    listing = _Capture(_page(ROUTINE))
+    monkeypatch.setattr(endpoint, "asyncio", listing)
+    rows = _result(await mcp.call_tool(tool, {}))["result"]
+    assert [r["id"] for r in rows] == [1]
+
+
 # ---------- day: need_logs_to_advance ----------
 
 

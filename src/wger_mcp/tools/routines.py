@@ -50,6 +50,7 @@ from wger_api_client.api.max_weight_config import (
     max_weight_config_list,
     max_weight_config_partial_update,
 )
+from wger_api_client.api.public_templates import public_templates_list
 from wger_api_client.api.repetitions_config import (
     repetitions_config_create,
     repetitions_config_destroy,
@@ -95,6 +96,7 @@ from wger_api_client.api.slot_entry import (
     slot_entry_partial_update,
     slot_entry_retrieve,
 )
+from wger_api_client.api.templates import templates_list
 from wger_api_client.api.weight_config import (
     weight_config_create,
     weight_config_destroy,
@@ -342,8 +344,38 @@ def register_read(mcp: MCPServer, api: AuthenticatedClient, settings: Settings) 
     async def list_routines(
         limit: Annotated[int, Field(ge=1, le=200)] = 20,
     ) -> list[dict[str, Any]]:
-        """List the user's training routines (new wger model)."""
-        return await paginate(routine_list.asyncio, client=api, limit=limit)
+        """List the user's own training routines, newest start first.
+
+        Templates are left out: the user's own are in list_templates, the
+        ones shared by every user of the instance in list_public_templates.
+        """
+        # wger's /routine/ also returns every user's public templates; only
+        # templates can be public, so is_template=false leaves the user's own.
+        return await paginate(routine_list.asyncio, client=api, limit=limit, is_template=False)
+
+    @mcp.tool()
+    @api_list_tool
+    async def list_templates(
+        limit: Annotated[int, Field(ge=1, le=200)] = 20,
+    ) -> list[dict[str, Any]]:
+        """List the user's own routine templates (reusable blueprints).
+
+        Read one with get_routine.
+        """
+        return await paginate(templates_list.asyncio, client=api, limit=limit)
+
+    @mcp.tool()
+    @api_list_tool
+    async def list_public_templates(
+        limit: Annotated[int, Field(ge=1, le=200)] = 20,
+    ) -> list[dict[str, Any]]:
+        """List routine templates that users of this wger instance shared publicly.
+
+        Most belong to other people: never present one as the user's own
+        plan (the user's own templates are the ones list_templates returns).
+        Read one with get_routine.
+        """
+        return await paginate(public_templates_list.asyncio, client=api, limit=limit)
 
     @mcp.tool()
     @api_tool

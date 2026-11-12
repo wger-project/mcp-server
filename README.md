@@ -341,7 +341,8 @@ The training-plan tree is the largest group and splits in two: `routines_read` (
 
 | Tool | Description |
 |------|-------------|
-| `list_routines` / `get_routine(routine_id)` | List / read training routines |
+| `list_routines` / `get_routine(routine_id)` | List your own training routines (templates excluded) / read any routine you can see |
+| `list_templates` / `list_public_templates` | List your own routine templates / the templates every user of the instance shared publicly |
 | `create_routine(name, description?, start?, end?, fit_in_week?, is_template?, is_public?)` | Create a routine. `is_template` marks it a reusable blueprint; `is_public` additionally offers it to every user of the instance |
 | `update_routine(routine_id, ...)` / `delete_routine(routine_id)` | Patch / delete a routine (cascade) |
 | `list_routine_days(routine_id)` / `get_routine_day(day_id)` | Read day structure |

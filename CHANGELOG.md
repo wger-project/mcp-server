@@ -19,6 +19,11 @@ notes. This file records important changes to *this package*.
   `wger-api-client>=2.7.1`.
 * Tested on Python 3.11 through 3.15. The lock file is refreshed so that
   every compiled dependency has wheels for 3.15.
+* `list_routines` returns only the user's own routines. wger's `/routine/`
+  also lists every user's public templates, so on a busy instance the
+  user's plans were buried among strangers' and a model could mistake one for
+  theirs. Templates now have their own tools: `list_templates` for the user's
+  own, `list_public_templates` for the ones shared on the instance.
 
 ## 2.7.0
 
